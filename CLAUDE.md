@@ -1,155 +1,224 @@
-# CLAUDE.md - AI Assistant Guide for ClawdConsole
+# CLAUDE.md - AI Assistant Guide for Clawd Console
 
-This document provides guidance for AI assistants working with the ClawdConsole repository.
+This document provides guidance for AI assistants working with the Clawd Console repository.
 
 ## Project Overview
 
 **Repository**: ClawdConsole
-**Status**: Initial development phase
-**Purpose**: Console application project (to be defined as development progresses)
+**Status**: Active development (Checkpoint B complete)
+**Purpose**: Local-first AI control interface for ClawdBot
+
+### Non-Negotiable Principles
+
+1. **Offline-first by default** - No internet access required
+2. **Human-in-the-loop** - All actions must be proposed → approved → logged
+3. **Local-only** - localhost communication only, no telemetry
+4. **Explainability** - UI explains what is happening, no jargon
+5. **Security by design** - Workspace jail enforced, audit trail for everything
 
 ## Repository Structure
 
 ```
 ClawdConsole/
-├── README.md           # Project description and documentation
-├── CLAUDE.md           # This file - AI assistant guidelines
-└── (additional structure to be added)
+├── backend/
+│   ├── src/
+│   │   ├── database/
+│   │   │   ├── schema.sql         # SQLite schema
+│   │   │   └── db.ts              # Database operations
+│   │   ├── routes/
+│   │   │   ├── setup.ts           # Setup wizard API
+│   │   │   ├── status.ts          # Dashboard status API
+│   │   │   ├── chat.ts            # Conversations API
+│   │   │   ├── actions.ts         # Action approval API
+│   │   │   ├── security.ts        # Security profiles API
+│   │   │   └── logs.ts            # Audit log API
+│   │   ├── middleware/
+│   │   │   └── workspaceJail.ts   # Path security enforcement
+│   │   ├── services/
+│   │   │   ├── clawdbot.ts        # ClawdBot communication
+│   │   │   └── localAI.ts         # Ollama/LM Studio detection
+│   │   └── index.ts               # Express server entry point
+│   ├── package.json
+│   └── tsconfig.json
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   └── Layout.tsx         # App layout with sidebar
+│   │   ├── pages/
+│   │   │   ├── Dashboard.tsx      # Status overview
+│   │   │   ├── Chat.tsx           # Local AI chat
+│   │   │   ├── Approvals.tsx      # Action approval panel
+│   │   │   ├── Logs.tsx           # Audit trail viewer
+│   │   │   ├── Security.tsx       # Security profiles
+│   │   │   ├── Integrations.tsx   # AI provider config
+│   │   │   └── Settings.tsx       # App settings
+│   │   ├── services/
+│   │   │   └── api.ts             # Fetch wrapper (local only)
+│   │   ├── types/
+│   │   │   └── index.ts           # TypeScript types
+│   │   ├── App.tsx                # Router setup
+│   │   ├── main.tsx               # Entry point
+│   │   └── index.css              # Global styles
+│   ├── index.html
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── vite.config.ts
+├── package.json                    # Root workspace runner
+├── .gitignore
+├── README.md
+└── CLAUDE.md
 ```
-
-### Current State
-
-This repository is in its initial setup phase. The project structure will evolve as development progresses.
-
-## Development Guidelines
-
-### General Principles
-
-1. **Keep it simple** - Avoid over-engineering; implement only what's needed
-2. **Be explicit** - Favor clarity over cleverness in code
-3. **Document as you go** - Update this file when adding significant features or conventions
-
-### Code Style
-
-- Follow language-specific best practices for whichever language is chosen
-- Use meaningful variable and function names
-- Keep functions focused and single-purpose
-- Write self-documenting code; add comments only when logic isn't self-evident
-
-### Git Workflow
-
-- **Main branch**: Protected; contains stable, reviewed code
-- **Feature branches**: Use descriptive names (e.g., `feature/add-user-auth`, `fix/memory-leak`)
-- **Commit messages**: Write clear, concise messages describing what and why
-  - Use imperative mood: "Add feature" not "Added feature"
-  - Keep first line under 50 characters
-  - Add body for complex changes
-
-### Commit Message Format
-
-```
-<type>: <short description>
-
-<optional body explaining why and context>
-```
-
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
-
-## For AI Assistants
-
-### Before Making Changes
-
-1. **Read first** - Always read files before modifying them
-2. **Understand context** - Explore related files to understand how code fits together
-3. **Check dependencies** - Understand what might be affected by changes
-
-### When Implementing Features
-
-1. Start by understanding existing patterns in the codebase
-2. Follow established conventions and coding styles
-3. Make minimal, focused changes that address the specific request
-4. Don't add features, refactoring, or "improvements" beyond what was asked
-5. Avoid introducing security vulnerabilities (command injection, XSS, SQL injection, etc.)
-
-### Testing
-
-- Write tests for new functionality when a testing framework is set up
-- Run existing tests before committing to ensure no regressions
-- Fix any tests broken by your changes
-
-### Documentation
-
-- Update README.md for user-facing changes
-- Update this CLAUDE.md when adding new conventions or significant structural changes
-- Don't create unnecessary documentation files
-
-## Configuration Files
-
-*This section will be populated as configuration files are added to the project.*
 
 ## Build & Development
 
-*Build instructions and development setup will be added as the project develops.*
-
 ### Prerequisites
 
-- (To be defined based on chosen technology stack)
+- Node.js >= 18.0.0
 
 ### Setup
 
 ```bash
-# Clone the repository
+# Clone and install
 git clone <repository-url>
 cd ClawdConsole
-
-# Additional setup steps to be added
+npm run install:all
 ```
 
 ### Running the Project
 
 ```bash
-# Commands to be added when project structure is established
+# Development (runs both backend and frontend)
+npm run dev
+
+# Backend only (localhost:3001)
+npm run dev:backend
+
+# Frontend only (localhost:5173)
+npm run dev:frontend
 ```
 
-### Running Tests
+### URLs
 
-```bash
-# Test commands to be added when testing framework is set up
-```
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3001/api
+- API proxy: Frontend /api/* → Backend
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18 + TypeScript + Vite |
+| UI Style | Clean, minimal, desktop-like |
+| Backend | Node.js + Express |
+| Database | SQLite (local file) |
+| Routing | React Router v6 |
 
 ## Key Components
 
-*This section will document key modules and components as they are developed.*
+### Backend Services
 
-## Common Tasks
+- **db.ts**: All SQLite operations (setup state, conversations, actions, logs)
+- **workspaceJail.ts**: Path validation, blocks traversal and system directories
+- **clawdbot.ts**: Communication with ClawdBot at localhost:7331
+- **localAI.ts**: Detects Ollama (11434) and LM Studio (1234)
 
-### Adding a New Feature
+### Frontend Services
 
-1. Create a feature branch from main
-2. Implement the feature following existing patterns
-3. Add tests if applicable
-4. Update documentation if needed
-5. Submit for review
+- **api.ts**: Fetch wrapper using relative paths only (/api/*)
+- **Layout.tsx**: Sidebar navigation + header + content area
+- **Pages**: Placeholder components for each route
 
-### Fixing a Bug
+## API Endpoints
 
-1. Reproduce the bug and understand the root cause
-2. Create a fix branch
-3. Implement the minimal fix needed
-4. Add a test to prevent regression
-5. Submit for review
+| Route | Purpose |
+|-------|---------|
+| `/api/setup/*` | Setup wizard state |
+| `/api/status/*` | Dashboard status |
+| `/api/chat/*` | Conversations and messages |
+| `/api/actions/*` | Pending action approval |
+| `/api/security/*` | Security profile management |
+| `/api/logs/*` | Audit log access |
 
-## Dependencies
+## Security Profiles
 
-*Dependencies will be listed here as they are added to the project.*
+| Profile | Network | External AI | Risk |
+|---------|---------|-------------|------|
+| AIR_GAPPED (default) | No | No | LOW |
+| LOCAL_ONLY | No | No | LOW |
+| CONNECTED | Allow-list | With approval | MEDIUM |
+| POWER_USER | Full | Full | HIGH |
 
-## Environment Variables
+## Development Guidelines
 
-*Environment variables and configuration will be documented here as needed.*
+### Code Style
 
-## Troubleshooting
+- TypeScript strict mode
+- Functional components with hooks
+- No external network calls in frontend (use /api/* proxy)
+- All file access through workspace jail
 
-*Common issues and solutions will be documented here as they arise.*
+### For AI Assistants
+
+1. **Read files before modifying**
+2. **Never add cloud/telemetry/analytics**
+3. **All actions require human approval**
+4. **Keep UI language calm and non-technical**
+5. **Log all security-relevant events**
+
+---
+
+## Checkpoint Progress
+
+### Checkpoint A: Backend Entrypoint + Run Scripts ✓
+- Express server on localhost:3001
+- Root package.json with dev/build scripts
+- SQLite database initialization
+
+### Checkpoint B: Frontend Shell + Routing ✓
+**What changed:**
+- Added react-router-dom for routing
+- Created Layout.tsx with sidebar navigation and header
+- Created 7 placeholder pages (Dashboard, Chat, Approvals, Logs, Security, Integrations, Settings)
+- Added api.ts fetch wrapper (relative paths only)
+- Added types/index.ts with TypeScript definitions
+- Added index.css with clean, desktop-like styles
+
+**Files added/updated:**
+- `frontend/src/components/Layout.tsx`
+- `frontend/src/pages/*.tsx` (7 files)
+- `frontend/src/services/api.ts`
+- `frontend/src/types/index.ts`
+- `frontend/src/index.css`
+- `frontend/src/App.tsx` (updated with routes)
+- `frontend/src/main.tsx` (added CSS import)
+
+**How to run:**
+```bash
+npm run dev
+# Frontend: http://localhost:5173
+# Backend: http://localhost:3001
+```
+
+**Verified working:**
+- Routing works (all 7 pages accessible)
+- Sidebar navigation active states
+- No external network calls
+- TypeScript compiles without errors
+
+### Checkpoint C: SQLite Wiring + API Integration
+*Pending*
+
+### Checkpoint D: First-Run Setup Wizard UI + Persistence
+*Pending*
+
+### Checkpoint E: Dashboard + Chat + Actions + Security + Logs UI
+*Pending*
+
+### Checkpoint F: Mock Mode
+*Pending*
+
+### Checkpoint G: Final Cleanup
+*Pending*
 
 ---
 
@@ -158,7 +227,9 @@ cd ClawdConsole
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-02-04 | Initial CLAUDE.md created | AI Assistant |
+| 2026-02-04 | Checkpoint A: Backend + run scripts | AI Assistant |
+| 2026-02-04 | Checkpoint B: Frontend shell + routing | AI Assistant |
 
 ---
 
-*This document should be updated as the project evolves. When adding new conventions, patterns, or significant structural changes, please update the relevant sections.*
+*This document should be updated as the project evolves.*

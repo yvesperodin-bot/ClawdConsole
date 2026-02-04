@@ -2,37 +2,34 @@
  * Clawd Console - Main Application
  *
  * Local-first AI control interface.
- * This is a placeholder that will be replaced in Checkpoint B.
+ * Routes are defined here and rendered through the Layout component.
  */
+
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import Dashboard from './pages/Dashboard';
+import Chat from './pages/Chat';
+import Approvals from './pages/Approvals';
+import Logs from './pages/Logs';
+import Security from './pages/Security';
+import Integrations from './pages/Integrations';
+import Settings from './pages/Settings';
 
 function App() {
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      padding: '2rem',
-      textAlign: 'center',
-    }}>
-      <h1 style={{ fontSize: '2rem', marginBottom: '1rem', color: '#2c3e50' }}>
-        Clawd Console
-      </h1>
-      <p style={{ fontSize: '1.1rem', color: '#666', marginBottom: '2rem' }}>
-        Local-first AI Control Interface
-      </p>
-      <div style={{
-        padding: '1rem 2rem',
-        background: '#e8f5e9',
-        borderRadius: '8px',
-        border: '1px solid #a5d6a7',
-      }}>
-        <p style={{ color: '#2e7d32' }}>
-          Backend is running. Frontend routes coming in Checkpoint B.
-        </p>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="chat" element={<Chat />} />
+          <Route path="approvals" element={<Approvals />} />
+          <Route path="logs" element={<Logs />} />
+          <Route path="security" element={<Security />} />
+          <Route path="integrations" element={<Integrations />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }
 
