@@ -321,6 +321,28 @@ export function exportAuditLog(format: 'json' | 'csv'): string {
   return [headers.join(','), ...rows].join('\n');
 }
 
+// App settings
+export function getSetting(key: string): string | null {
+  const db = getDatabase();
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+  const db = getDatabase();
+  db.prepare(`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, datetime('now', 'localtime'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(key, value);
+}
+
+export function getAllSettings(): Record<string, string> {
+  const db = getDatabase();
+  const rows = db.prepare('SELECT key, value FROM app_settings').all() as Array<{ key: string; value: string }>;
+  return Object.fromEntries(rows.map(r => [r.key, r.value]));
+}
+
 // Close database on exit
 export function closeDatabase(): void {
   if (db) {

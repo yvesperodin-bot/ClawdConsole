@@ -7,8 +7,9 @@ import { logAudit } from '../database/db.js';
  * This is the ONLY external service allowed in AIR_GAPPED mode since it's local.
  */
 
-const CLAWDBOT_URL = 'http://localhost:7331';
-const TIMEOUT_MS = 5000;
+const CLAWDBOT_URL = 'http://127.0.0.1:7331';
+const HEALTH_CHECK_TIMEOUT_MS = 1000; // Fast timeout for status checks
+const REQUEST_TIMEOUT_MS = 5000; // Longer timeout for actual requests
 
 export interface ClawdBotStatus {
   connected: boolean;
@@ -30,7 +31,7 @@ export interface ClawdBotResponse {
 export async function checkClawdBotStatus(): Promise<ClawdBotStatus> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
 
     const response = await fetch(`${CLAWDBOT_URL}/health`, {
       method: 'GET',
@@ -129,7 +130,7 @@ export async function requestAction(
 ): Promise<ClawdBotResponse> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     const response = await fetch(`${CLAWDBOT_URL}/action/request`, {
       method: 'POST',

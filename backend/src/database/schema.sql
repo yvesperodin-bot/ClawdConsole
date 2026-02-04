@@ -1,6 +1,13 @@
 -- Clawd Console Database Schema
 -- Local-only SQLite database for persistent state
 
+-- App settings (key-value store)
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 -- Setup wizard completion state
 CREATE TABLE IF NOT EXISTS setup_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),

@@ -16,7 +16,7 @@ import logsRoutes from './routes/logs.js';
  */
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 // Middleware
 app.use(cors({
@@ -37,6 +37,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Server start time for uptime calculation
+const startTime = Date.now();
+
 // Health check endpoint (always available)
 app.get('/health', (req, res) => {
   res.json({
@@ -44,6 +47,15 @@ app.get('/health', (req, res) => {
     service: 'clawd-console-backend',
     timestamp: new Date().toISOString(),
     local_only: true,
+  });
+});
+
+// API health endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    version: '1.0.0',
+    uptime: Math.floor((Date.now() - startTime) / 1000),
   });
 });
 

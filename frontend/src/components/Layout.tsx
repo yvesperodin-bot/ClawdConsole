@@ -1,12 +1,47 @@
+import { useState, useEffect } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { apiGet } from '../services/api';
+
+interface StatusData {
+  setup_required?: boolean;
+  clawdbot?: {
+    connected: boolean;
+  };
+  network?: {
+    allowed: boolean;
+  };
+}
 
 /**
  * Main application layout
  * - Left sidebar with navigation
- * - Top header with status area
+ * - Top header with live status indicators
  * - Main content area renders child routes
  */
 export default function Layout() {
+  const [status, setStatus] = useState<StatusData | null>(null);
+  const [serverOnline, setServerOnline] = useState(true);
+
+  useEffect(() => {
+    fetchStatus();
+    // Poll every 10 seconds
+    const interval = setInterval(fetchStatus, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchStatus() {
+    const result = await apiGet<StatusData>('/api/status');
+    if (result.error) {
+      setServerOnline(false);
+    } else {
+      setServerOnline(true);
+      setStatus(result.data ?? null);
+    }
+  }
+
+  const clawdbotConnected = status?.clawdbot?.connected ?? false;
+  const networkEnabled = status?.network?.allowed ?? false;
+
   return (
     <div className="app-layout">
       {/* Sidebar */}
@@ -53,12 +88,16 @@ export default function Layout() {
           <h1 className="header-title">Clawd Console</h1>
           <div className="header-status">
             <div className="status-indicator">
-              <span className="status-dot offline"></span>
+              <span className={`status-dot ${serverOnline ? 'online' : 'offline'}`}></span>
+              <span>Server</span>
+            </div>
+            <div className="status-indicator">
+              <span className={`status-dot ${clawdbotConnected ? 'online' : 'offline'}`}></span>
               <span>ClawdBot</span>
             </div>
             <div className="status-indicator">
-              <span className="status-dot online"></span>
-              <span>Local Mode</span>
+              <span className={`status-dot ${networkEnabled ? 'online' : ''}`} style={!networkEnabled ? { backgroundColor: 'var(--color-text-muted)' } : {}}></span>
+              <span>{networkEnabled ? 'Network ON' : 'Local Only'}</span>
             </div>
           </div>
         </header>

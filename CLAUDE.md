@@ -205,8 +205,40 @@ npm run dev
 - No external network calls
 - TypeScript compiles without errors
 
-### Checkpoint C: SQLite Wiring + API Integration
-*Pending*
+### Checkpoint C: SQLite Wiring + API Integration ✓
+**What changed:**
+- Added `app_settings` table to SQLite schema
+- Added `getSetting`, `setSetting`, `getAllSettings` functions to db.ts
+- Added `/api/health` endpoint returning `{ ok, version, uptime }`
+- Reduced ClawdBot health check timeout to 1000ms (fast fail)
+- Dashboard now fetches live status from `/api/status`
+- Layout header shows live connection indicators (Server, ClawdBot, Network)
+- Added CSS for status grid display
+
+**Files added/updated:**
+- `backend/src/database/schema.sql` (added app_settings table)
+- `backend/src/database/db.ts` (added settings functions)
+- `backend/src/services/clawdbot.ts` (reduced timeout to 1000ms)
+- `backend/src/index.ts` (added /api/health, fixed PORT type)
+- `frontend/src/pages/Dashboard.tsx` (live status display)
+- `frontend/src/components/Layout.tsx` (live header indicators)
+- `frontend/src/index.css` (status grid styles)
+
+**How to run:**
+```bash
+npm run dev
+# Frontend: http://localhost:5173
+# Backend: http://localhost:3001
+```
+
+**Verified working:**
+- SQLite database created at `backend/clawd_console.db`
+- `/api/health` returns `{ ok: true, version: "1.0.0", uptime: N }`
+- `/api/status` returns ClawdBot status, network state, profile, workspace
+- Dashboard displays live status with auto-refresh (10s)
+- Header shows green/red dots for Server and ClawdBot status
+- All API calls use relative /api/* paths (through Vite proxy)
+- Localhost-only: backend binds to 127.0.0.1:3001
 
 ### Checkpoint D: First-Run Setup Wizard UI + Persistence
 *Pending*
@@ -229,6 +261,7 @@ npm run dev
 | 2026-02-04 | Initial CLAUDE.md created | AI Assistant |
 | 2026-02-04 | Checkpoint A: Backend + run scripts | AI Assistant |
 | 2026-02-04 | Checkpoint B: Frontend shell + routing | AI Assistant |
+| 2026-02-04 | Checkpoint C: SQLite wiring + API integration | AI Assistant |
 
 ---
 
