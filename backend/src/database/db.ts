@@ -85,6 +85,16 @@ export function completeSetup(
   return getSetupState()!;
 }
 
+export function updateSetupPinHash(newHash: string): void {
+  const db = getDatabase();
+  db.prepare(`
+    UPDATE setup_state
+    SET admin_pin_hash = ?,
+        updated_at = datetime('now', 'localtime')
+    WHERE id = 1
+  `).run(newHash);
+}
+
 export function updateSecurityProfile(profile: string, adminPinHash?: string): void {
   const db = getDatabase();
   const currentState = getSetupState();

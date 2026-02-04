@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
+import bcrypt from 'bcrypt';
 import {
   getSetupState,
   createSetupState,
@@ -11,9 +11,44 @@ import {
   logAudit,
   setSetting,
   getSetting,
+  updateSetupPinHash,
 } from '../database/db.js';
 import { checkClawdBotStatus } from '../services/clawdbot.js';
 import { detectLocalAI, getLocalAIExplanation } from '../services/localAI.js';
+
+const BCRYPT_ROUNDS = 10;
+
+/**
+ * Check if a hash is SHA-256 (legacy) vs bcrypt
+ * SHA-256 hex is always 64 characters
+ * Bcrypt hashes start with $2b$ and are 60 characters
+ */
+function isLegacySha256Hash(hash: string): boolean {
+  return hash.length === 64 && /^[a-f0-9]+$/.test(hash);
+}
+
+/**
+ * Verify PIN against stored hash (supports both SHA-256 and bcrypt)
+ * Returns true if valid, false if invalid
+ * Also performs migration to bcrypt if legacy hash detected
+ */
+async function verifyAndMigratePin(pin: string, storedHash: string): Promise<{ valid: boolean; newHash?: string }> {
+  if (isLegacySha256Hash(storedHash)) {
+    // Legacy SHA-256 comparison (for migration)
+    const crypto = await import('crypto');
+    const providedHash = crypto.createHash('sha256').update(pin).digest('hex');
+    if (providedHash === storedHash) {
+      // Valid legacy hash - migrate to bcrypt
+      const newHash = await bcrypt.hash(pin, BCRYPT_ROUNDS);
+      return { valid: true, newHash };
+    }
+    return { valid: false };
+  }
+
+  // Modern bcrypt comparison
+  const valid = await bcrypt.compare(pin, storedHash);
+  return { valid };
+}
 
 const router = Router();
 
@@ -212,7 +247,7 @@ router.get('/security-profiles', (req: Request, res: Response) => {
  * POST /api/setup/complete
  * Complete the setup wizard
  */
-router.post('/complete', (req: Request, res: Response) => {
+router.post('/complete', async (req: Request, res: Response) => {
   const { workspace_path, security_profile, admin_pin } = req.body;
 
   // Validate workspace path
@@ -253,10 +288,10 @@ router.post('/complete', (req: Request, res: Response) => {
     });
   }
 
-  // Hash admin PIN if provided
+  // Hash admin PIN if provided (using bcrypt)
   let adminPinHash: string | null = null;
   if (admin_pin && typeof admin_pin === 'string' && admin_pin.length >= 4) {
-    adminPinHash = crypto.createHash('sha256').update(admin_pin).digest('hex');
+    adminPinHash = await bcrypt.hash(admin_pin, BCRYPT_ROUNDS);
   }
 
   // Create initial setup state if not exists
@@ -293,7 +328,7 @@ router.post('/complete', (req: Request, res: Response) => {
  * POST /api/setup/reset
  * Reset setup (requires admin PIN if set)
  */
-router.post('/reset', (req: Request, res: Response) => {
+router.post('/reset', async (req: Request, res: Response) => {
   const { admin_pin } = req.body;
   const state = getSetupState();
 
@@ -314,13 +349,20 @@ router.post('/reset', (req: Request, res: Response) => {
       });
     }
 
-    const providedHash = crypto.createHash('sha256').update(admin_pin).digest('hex');
-    if (providedHash !== state.admin_pin_hash) {
+    const result = await verifyAndMigratePin(admin_pin, state.admin_pin_hash);
+    if (!result.valid) {
       logAudit('SECURITY', 'INVALID_PIN', 'Invalid admin PIN provided for setup reset', null, 'HIGH');
       return res.status(403).json({
         success: false,
         error: 'Incorrect admin PIN.',
       });
+    }
+
+    // Migrate to bcrypt if legacy hash was used
+    if (result.newHash) {
+      updateSetupPinHash(result.newHash);
+      setSetting('adminPinHash', result.newHash);
+      logAudit('SECURITY', 'PIN_MIGRATED', 'Admin PIN hash migrated from SHA-256 to bcrypt', null, 'INFO');
     }
   }
 
@@ -342,7 +384,7 @@ router.post('/reset', (req: Request, res: Response) => {
  * POST /api/setup/pin/verify
  * Verify admin PIN (for future gated actions)
  */
-router.post('/pin/verify', (req: Request, res: Response) => {
+router.post('/pin/verify', async (req: Request, res: Response) => {
   const { admin_pin } = req.body;
   const state = getSetupState();
 
@@ -360,12 +402,19 @@ router.post('/pin/verify', (req: Request, res: Response) => {
     });
   }
 
-  const providedHash = crypto.createHash('sha256').update(admin_pin).digest('hex');
-  if (providedHash !== state.admin_pin_hash) {
+  const result = await verifyAndMigratePin(admin_pin, state.admin_pin_hash);
+  if (!result.valid) {
     return res.status(403).json({
       valid: false,
       error: 'Incorrect admin PIN.',
     });
+  }
+
+  // Migrate to bcrypt if legacy hash was used
+  if (result.newHash) {
+    updateSetupPinHash(result.newHash);
+    setSetting('adminPinHash', result.newHash);
+    logAudit('SECURITY', 'PIN_MIGRATED', 'Admin PIN hash migrated from SHA-256 to bcrypt', null, 'INFO');
   }
 
   res.json({

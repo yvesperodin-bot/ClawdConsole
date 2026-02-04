@@ -3,6 +3,7 @@ import {
   getSetupState,
   getSecurityProfile,
   getPendingActions,
+  getSetting,
 } from '../database/db.js';
 import { checkClawdBotStatus } from '../services/clawdbot.js';
 import { detectLocalAI, isNetworkAllowed } from '../services/localAI.js';
@@ -72,6 +73,7 @@ router.get('/', async (req: Request, res: Response) => {
         risk_level: a.risk_level,
       })),
     },
+    last_health_check: getSetting('lastHealthCheckAt') || null,
   });
 });
 

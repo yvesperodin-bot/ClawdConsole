@@ -5,7 +5,7 @@ This document provides guidance for AI assistants working with the Clawd Console
 ## Project Overview
 
 **Repository**: ClawdConsole
-**Status**: Active development (Checkpoint B complete)
+**Status**: Active development (Checkpoint E complete)
 **Purpose**: Local-first AI control interface for ClawdBot
 
 ### Non-Negotiable Principles
@@ -51,7 +51,20 @@ ClawdConsole/
 │   │   │   ├── Logs.tsx           # Audit trail viewer
 │   │   │   ├── Security.tsx       # Security profiles
 │   │   │   ├── Integrations.tsx   # AI provider config
-│   │   │   └── Settings.tsx       # App settings
+│   │   │   ├── Settings.tsx       # App settings
+│   │   │   ├── SetupWizard.tsx    # First-run setup orchestrator
+│   │   │   └── setup/             # Setup wizard step components
+│   │   │       ├── types.ts       # Shared types
+│   │   │       ├── StepWelcome.tsx
+│   │   │       ├── StepEnvironment.tsx
+│   │   │       ├── StepWorkspace.tsx
+│   │   │       ├── StepClawdBot.tsx
+│   │   │       ├── StepLocalAI.tsx
+│   │   │       ├── StepSecurity.tsx
+│   │   │       ├── StepPin.tsx
+│   │   │       ├── StepHealth.tsx
+│   │   │       ├── StepComplete.tsx
+│   │   │       └── index.ts       # Exports
 │   │   ├── services/
 │   │   │   └── api.ts             # Fetch wrapper (local only)
 │   │   ├── types/
@@ -279,15 +292,100 @@ npm run dev
 - All 9 wizard steps navigate correctly
 - Workspace path validation works
 - Security profile selection works
-- PIN setup (optional) works with SHA-256 hashing
+- PIN setup (optional) works with bcrypt hashing (upgraded from SHA-256 in E)
 - Setup completion stores all settings
 - Re-run setup from Settings page works
 - PIN required for reset if PIN was set
 - TypeScript compiles without errors
 - No external network calls
 
-### Checkpoint E: Dashboard + Chat + Actions + Security + Logs UI
-*Pending*
+### Checkpoint E: Dashboard + Chat + Actions + Security + Logs UI ✓
+**What changed:**
+
+**Part A - SetupWizard Refactoring:**
+- Extracted 9 step components into `frontend/src/pages/setup/` directory
+- Created shared `types.ts` with interfaces for wizard data
+- SetupWizard.tsx now a thin orchestrator (imports from ./setup)
+- No behavior changes, improved maintainability
+
+**Part B - PIN Security Upgrade:**
+- Replaced SHA-256 with bcrypt (10 rounds) for admin PIN hashing
+- Added automatic migration: legacy SHA-256 hashes upgraded to bcrypt on next verification
+- Added `updateSetupPinHash()` function to db.ts
+- Backend routes now use async handlers for bcrypt
+
+**E1 - Enhanced Dashboard:**
+- Shows current security profile with risk level badge
+- Displays workspace path with explanation
+- Shows last health check timestamp (relative time)
+- Local AI status display (Ollama/LM Studio)
+- Run Health Check button
+- Pending approvals preview card (when actions pending)
+
+**E2 - Chat UI:**
+- Conversation sidebar with list/create/delete
+- Main chat area with message history
+- Message input with Enter-to-send
+- Optimistic UI updates for sending
+- Error handling with system messages
+- Safety notice banner
+
+**E3 - Action Approval Panel:**
+- List of pending actions with risk indicators
+- Expandable action cards showing target/preview
+- Approve and Deny buttons
+- Action history table (toggle view)
+- Auto-refresh every 5 seconds
+
+**E4 - Security Profiles Page:**
+- Current profile display with permissions grid
+- All 4 profiles shown in card grid
+- PIN gate for profile changes
+- Confirmation dialog for risk upgrades
+- Warning messages for high-risk profiles
+
+**E5 - Logs UI:**
+- Stats cards (total events, 24h alerts, high risk count)
+- Filter by category and risk level
+- Expandable log entries with JSON details
+- Export to JSON and CSV
+- Clickable rows to expand details
+
+**Files added:**
+- `frontend/src/pages/setup/*.tsx` (10 component files)
+- `frontend/src/pages/setup/types.ts`
+- `frontend/src/pages/setup/index.ts`
+
+**Files updated:**
+- `backend/package.json` (added bcrypt)
+- `backend/src/routes/setup.ts` (bcrypt, async handlers)
+- `backend/src/routes/status.ts` (lastHealthCheckAt)
+- `backend/src/database/db.ts` (updateSetupPinHash)
+- `frontend/src/pages/SetupWizard.tsx` (refactored)
+- `frontend/src/pages/Dashboard.tsx` (enhanced)
+- `frontend/src/pages/Chat.tsx` (full implementation)
+- `frontend/src/pages/Approvals.tsx` (full implementation)
+- `frontend/src/pages/Security.tsx` (full implementation)
+- `frontend/src/pages/Logs.tsx` (full implementation)
+- `frontend/src/index.css` (many new styles)
+
+**How to run:**
+```bash
+npm run dev
+# Complete setup wizard on first run
+# Then explore Dashboard, Chat, Approvals, Security, Logs
+```
+
+**Verified working:**
+- SetupWizard refactored into 10 components
+- PIN hashing upgraded to bcrypt with migration
+- Dashboard shows all status info
+- Chat creates/displays conversations and messages
+- Approvals shows pending actions with approve/deny
+- Security shows profiles with PIN-protected switching
+- Logs displays filterable audit trail with export
+- TypeScript compiles without errors
+- All APIs use relative /api/* paths
 
 ### Checkpoint F: Mock Mode
 *Pending*
@@ -306,6 +404,7 @@ npm run dev
 | 2026-02-04 | Checkpoint B: Frontend shell + routing | AI Assistant |
 | 2026-02-04 | Checkpoint C: SQLite wiring + API integration | AI Assistant |
 | 2026-02-04 | Checkpoint D: First-Run Setup Wizard | AI Assistant |
+| 2026-02-04 | Checkpoint E: Full UI implementation + bcrypt | AI Assistant |
 
 ---
 

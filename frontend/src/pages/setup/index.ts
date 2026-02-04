@@ -1,0 +1,10 @@
+export { default as StepWelcome } from './StepWelcome';
+export { default as StepEnvironment } from './StepEnvironment';
+export { default as StepWorkspace } from './StepWorkspace';
+export { default as StepClawdBot } from './StepClawdBot';
+export { default as StepLocalAI } from './StepLocalAI';
+export { default as StepSecurity } from './StepSecurity';
+export { default as StepPin } from './StepPin';
+export { default as StepHealth } from './StepHealth';
+export { default as StepComplete } from './StepComplete';
+export * from './types';
