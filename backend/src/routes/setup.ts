@@ -9,11 +9,36 @@ import {
   completeSetup,
   getSecurityProfiles,
   logAudit,
+  setSetting,
+  getSetting,
 } from '../database/db.js';
 import { checkClawdBotStatus } from '../services/clawdbot.js';
 import { detectLocalAI, getLocalAIExplanation } from '../services/localAI.js';
 
 const router = Router();
+
+// Helper to get default workspace path
+function getDefaultWorkspacePath(): string {
+  const platform = os.platform();
+  if (platform === 'win32') {
+    return 'C:\\AI_WORKSPACE';
+  }
+  return path.join(os.homedir(), 'AI_WORKSPACE');
+}
+
+/**
+ * GET /api/setup/state
+ * Get current setup state for the wizard
+ */
+router.get('/state', (req: Request, res: Response) => {
+  const state = getSetupState();
+  res.json({
+    setupComplete: state?.completed ?? false,
+    workspacePath: state?.workspace_path ?? getDefaultWorkspacePath(),
+    securityProfile: state?.security_profile ?? 'AIR_GAPPED',
+    hasAdminPin: !!state?.admin_pin_hash,
+  });
+});
 
 /**
  * GET /api/setup/status
@@ -243,6 +268,15 @@ router.post('/complete', (req: Request, res: Response) => {
   // Complete setup
   const state = completeSetup(workspace_path, profile, adminPinHash);
 
+  // Also store in app_settings for easy access
+  setSetting('setupComplete', 'true');
+  setSetting('workspacePath', workspace_path);
+  setSetting('securityProfile', profile);
+  if (adminPinHash) {
+    setSetting('adminPinHash', adminPinHash);
+  }
+  setSetting('lastHealthCheckAt', new Date().toISOString());
+
   res.json({
     success: true,
     message: 'Setup completed successfully. Welcome to Clawd Console!',
@@ -292,11 +326,70 @@ router.post('/reset', (req: Request, res: Response) => {
 
   // Reset by creating new uncompleted state
   createSetupState(state.workspace_path);
+
+  // Also update app_settings
+  setSetting('setupComplete', 'false');
+
   logAudit('SETUP', 'RESET', 'Setup wizard reset', null, 'MEDIUM');
 
   res.json({
     success: true,
     message: 'Setup has been reset. Please complete the setup wizard again.',
+  });
+});
+
+/**
+ * POST /api/setup/pin/verify
+ * Verify admin PIN (for future gated actions)
+ */
+router.post('/pin/verify', (req: Request, res: Response) => {
+  const { admin_pin } = req.body;
+  const state = getSetupState();
+
+  if (!state || !state.admin_pin_hash) {
+    return res.json({
+      valid: true,
+      message: 'No admin PIN is configured.',
+    });
+  }
+
+  if (!admin_pin) {
+    return res.status(400).json({
+      valid: false,
+      error: 'Please enter your admin PIN.',
+    });
+  }
+
+  const providedHash = crypto.createHash('sha256').update(admin_pin).digest('hex');
+  if (providedHash !== state.admin_pin_hash) {
+    return res.status(403).json({
+      valid: false,
+      error: 'Incorrect admin PIN.',
+    });
+  }
+
+  res.json({
+    valid: true,
+    message: 'PIN verified.',
+  });
+});
+
+/**
+ * POST /api/setup/run-health-check
+ * Run a system health check
+ */
+router.post('/run-health-check', async (req: Request, res: Response) => {
+  const clawdbotStatus = await checkClawdBotStatus();
+  const localAIStatus = await detectLocalAI();
+
+  // Update last health check time
+  setSetting('lastHealthCheckAt', new Date().toISOString());
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    clawdbot: clawdbotStatus,
+    localAI: localAIStatus,
+    allGood: clawdbotStatus.connected || localAIStatus.anyAvailable,
   });
 });
 

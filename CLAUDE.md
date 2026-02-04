@@ -240,8 +240,51 @@ npm run dev
 - All API calls use relative /api/* paths (through Vite proxy)
 - Localhost-only: backend binds to 127.0.0.1:3001
 
-### Checkpoint D: First-Run Setup Wizard UI + Persistence
-*Pending*
+### Checkpoint D: First-Run Setup Wizard UI + Persistence ✓
+**What changed:**
+- Added multi-step Setup Wizard with 9 steps:
+  1. Welcome & explanation
+  2. Environment check (OS, RAM, disk)
+  3. Workspace selection with validation
+  4. ClawdBot detection
+  5. Local AI detection (Ollama/LM Studio)
+  6. Security profile selection
+  7. Optional Admin PIN setup
+  8. Health check
+  9. Completion confirmation
+- Added `/api/setup/state` endpoint for wizard state
+- Added `/api/setup/pin/verify` endpoint for PIN verification
+- Added `/api/setup/run-health-check` endpoint
+- App redirects to `/setup` if setup not complete
+- Settings page has "Re-run Setup Wizard" button
+- PIN required to reset if admin PIN was set
+- All wizard data persisted to SQLite (setup_state + app_settings)
+
+**Files added/updated:**
+- `frontend/src/pages/SetupWizard.tsx` (new - 700+ lines)
+- `frontend/src/pages/Settings.tsx` (updated with re-run button)
+- `frontend/src/App.tsx` (setup state check + redirect)
+- `frontend/src/index.css` (wizard styles, dialog styles)
+- `backend/src/routes/setup.ts` (added state/pin/health endpoints)
+
+**How to run:**
+```bash
+npm run dev
+# First run: redirects to http://localhost:5173/setup
+# After setup: http://localhost:5173
+```
+
+**Verified working:**
+- Fresh start shows setup wizard (mandatory)
+- All 9 wizard steps navigate correctly
+- Workspace path validation works
+- Security profile selection works
+- PIN setup (optional) works with SHA-256 hashing
+- Setup completion stores all settings
+- Re-run setup from Settings page works
+- PIN required for reset if PIN was set
+- TypeScript compiles without errors
+- No external network calls
 
 ### Checkpoint E: Dashboard + Chat + Actions + Security + Logs UI
 *Pending*
@@ -262,6 +305,7 @@ npm run dev
 | 2026-02-04 | Checkpoint A: Backend + run scripts | AI Assistant |
 | 2026-02-04 | Checkpoint B: Frontend shell + routing | AI Assistant |
 | 2026-02-04 | Checkpoint C: SQLite wiring + API integration | AI Assistant |
+| 2026-02-04 | Checkpoint D: First-Run Setup Wizard | AI Assistant |
 
 ---
 
