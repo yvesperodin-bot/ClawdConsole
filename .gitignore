@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Database (local only)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment files (should never be committed)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Lock files (optional - can be committed)
+# package-lock.json
+
+# Test coverage
+coverage/
