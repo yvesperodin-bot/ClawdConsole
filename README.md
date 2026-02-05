@@ -11,29 +11,69 @@ Clawd Console is designed to run entirely on your local machine:
 - **localhost only** - Backend binds to 127.0.0.1 exclusively
 - **Your data stays yours** - SQLite database stored locally
 
-## Quick Start
+## Getting Started
 
 ### Prerequisites
 
 - Node.js >= 18.0.0
 
-### Installation
+---
 
+### Recommended (Most Users)
+
+The simplest way to get started. Perfect for everyday use.
+
+**Step 1: Download and install**
 ```bash
-# Clone the repository
 git clone <repository-url>
 cd ClawdConsole
-
-# Install dependencies
 npm run install:all
+```
 
-# Start development servers
+**Step 2: Launch**
+```bash
 npm run dev
 ```
 
-Access the application:
-- **Frontend:** http://localhost:5173
-- **Backend API:** http://localhost:3001
+**Step 3: Open in your browser**
+- Go to http://localhost:5173
+
+That's it! The setup wizard will guide you through initial configuration.
+
+---
+
+### Advanced (Builders & Power Users)
+
+For developers who want to modify the code or run frontend and backend separately.
+
+**Development mode with hot reload:**
+```bash
+# Install dependencies
+npm run install:all
+
+# Start both servers with hot reload
+npm run dev
+```
+
+**Run servers independently:**
+```bash
+# Backend only (localhost:3001)
+npm run dev:backend
+
+# Frontend only (localhost:5173)
+npm run dev:frontend
+```
+
+**Build for production:**
+```bash
+npm run build
+```
+
+**Access points:**
+- Frontend UI: http://localhost:5173
+- Backend API: http://localhost:3001
+
+---
 
 ### First Run
 
@@ -96,19 +136,6 @@ ClawdConsole/
 │       ├── pages/      # Route pages
 │       └── services/   # API client
 └── CLAUDE.md         # AI assistant guide
-```
-
-## Development
-
-```bash
-# Run backend only
-npm run dev:backend
-
-# Run frontend only
-npm run dev:frontend
-
-# Build for production
-npm run build
 ```
 
 ## License
