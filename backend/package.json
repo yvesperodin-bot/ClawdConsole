@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "node -e \"require('fs').copyFileSync('src/database/schema.sql', 'dist/database/schema.sql')\"",
     "start": "node dist/index.js"
   },
   "dependencies": {

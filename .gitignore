@@ -9,13 +9,14 @@ frontend/dist/
 backend/dist/
 *.tsbuildinfo
 
-# Database (local only - NEVER commit)
+# Database and data directory (local only - NEVER commit)
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
 backend/*.db
-backend/data/*.db
+backend/data/
+logs/
 
 # Environment files (NEVER commit)
 .env

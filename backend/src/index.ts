@@ -1,12 +1,18 @@
 import express from 'express';
 import cors from 'cors';
-import { getDatabase, getSetupState, logAudit } from './database/db.js';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { getDatabase, getSetupState, logAudit, DATA_DIR } from './database/db.js';
 import setupRoutes from './routes/setup.js';
 import statusRoutes from './routes/status.js';
 import chatRoutes from './routes/chat.js';
 import actionsRoutes from './routes/actions.js';
 import securityRoutes from './routes/security.js';
 import logsRoutes from './routes/logs.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Clawd Console Backend Server
@@ -17,12 +23,18 @@ import logsRoutes from './routes/logs.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
+const isProduction = process.env.NODE_ENV === 'production';
 
-// Middleware
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
-  credentials: true,
-}));
+// Static files directory (for production mode)
+const FRONTEND_DIST = path.join(__dirname, '..', '..', '..', 'frontend', 'dist');
+
+// Middleware - CORS only needed in dev mode (Vite proxy)
+if (!isProduction) {
+  app.use(cors({
+    origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
+    credentials: true,
+  }));
+}
 app.use(express.json({ limit: '1mb' }));
 
 // Request logging (for development)
@@ -67,13 +79,32 @@ app.use('/api/actions', actionsRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/logs', logsRoutes);
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Not found',
-    message: 'The requested endpoint does not exist.',
+// Production mode: Serve static frontend files
+if (isProduction && fs.existsSync(FRONTEND_DIST)) {
+  // Serve static assets
+  app.use(express.static(FRONTEND_DIST));
+
+  // SPA fallback: serve index.html for non-API routes
+  app.get('*', (req, res) => {
+    // Don't serve index.html for API routes
+    if (req.path.startsWith('/api/') || req.path === '/health') {
+      res.status(404).json({
+        error: 'Not found',
+        message: 'The requested API endpoint does not exist.',
+      });
+      return;
+    }
+    res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
   });
-});
+} else {
+  // Development mode or no frontend build: 404 for non-API routes
+  app.use((req, res) => {
+    res.status(404).json({
+      error: 'Not found',
+      message: 'The requested endpoint does not exist.',
+    });
+  });
+}
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -108,14 +139,20 @@ function start() {
     app.listen(PORT, '127.0.0.1', () => {
       console.log('');
       console.log('========================================');
-      console.log('  Clawd Console Backend');
+      console.log('  Clawd Console');
       console.log('========================================');
-      console.log(`  Running on: http://localhost:${PORT}`);
-      console.log('  Mode: LOCAL-ONLY (no external network)');
+      console.log(`  URL: http://localhost:${PORT}`);
+      console.log(`  Mode: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
+      console.log(`  Data: ${DATA_DIR}`);
+      console.log('  Network: LOCAL-ONLY (127.0.0.1)');
+      if (isProduction) {
+        console.log('');
+        console.log('  Open your browser to the URL above.');
+      }
       console.log('========================================');
       console.log('');
 
-      logAudit('SYSTEM', 'STARTUP', `Server started on port ${PORT}`, null, 'INFO');
+      logAudit('SYSTEM', 'STARTUP', `Server started on port ${PORT}`, { mode: isProduction ? 'production' : 'development' }, 'INFO');
     });
   } catch (error) {
     console.error('Failed to start server:', error);

@@ -6,9 +6,32 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Database file location (in backend directory)
-const DB_PATH = path.join(__dirname, '..', '..', 'clawd_console.db');
+// Determine data directory
+// Priority: CLAWD_DATA_DIR env var > backend/data/
+function getDataDir(): string {
+  if (process.env.CLAWD_DATA_DIR) {
+    const customDir = path.resolve(process.env.CLAWD_DATA_DIR);
+    if (!fs.existsSync(customDir)) {
+      fs.mkdirSync(customDir, { recursive: true });
+    }
+    return customDir;
+  }
+
+  // Default: backend/data/ (works from any working directory)
+  const backendRoot = path.join(__dirname, '..', '..');
+  const dataDir = path.join(backendRoot, 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  return dataDir;
+}
+
+const DATA_DIR = getDataDir();
+const DB_PATH = path.join(DATA_DIR, 'clawd_console.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
+
+// Export for use by other modules (e.g., logging)
+export { DATA_DIR };
 
 let db: Database.Database | null = null;
 

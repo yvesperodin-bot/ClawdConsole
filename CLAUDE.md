@@ -528,6 +528,78 @@ npm run dev
 - Approvals show explanations and toasts
 - Documentation complete
 
+### Checkpoint H: Windows-Friendly Shipping Experience ✓
+**What changed:**
+
+**H1 - Production Run Mode:**
+- Backend now serves built frontend as static files in production mode
+- Added `npm run start:prod` for production mode (NODE_ENV=production)
+- Frontend build served at http://localhost:3001 (single port)
+- CORS only enabled in development mode (Vite proxy)
+- SPA fallback for client-side routing
+
+**H2 - Double-Click Launchers:**
+- `scripts/run.cmd` - Windows launcher (double-click to start)
+- `scripts/run.ps1` - PowerShell script with:
+  - Node.js detection with friendly install instructions
+  - Dependency check with redirect to install.cmd
+  - Port-in-use detection with helpful message
+  - Auto-open browser after startup
+  - Log rotation (keeps last 5 logs in logs/ folder)
+- `scripts/install.cmd` - One-time setup launcher
+- `scripts/install.ps1` - PowerShell installer that:
+  - Installs all dependencies (npm ci or npm install)
+  - Builds the application
+  - Provides clear success/failure messages
+
+**H3 - Data Directory Standardization:**
+- Database moved to `backend/data/clawd_console.db`
+- Data directory auto-created on first run
+- CLAWD_DATA_DIR env var override supported
+- Works correctly when started from any directory
+
+**H4 - Offline/USB Install Documentation:**
+- Created `docs/OFFLINE_INSTALL.md` with:
+  - Recommended (Most Users) path: pre-built transfer
+  - Advanced paths: npm cache strategy, minimal transfer, direct node
+  - Troubleshooting section
+  - Security notes
+
+**H5 - README Getting Started Update:**
+- Recommended lane now uses double-click workflow
+- Step 1: Install Node.js (one time)
+- Step 2: Double-click install.cmd
+- Step 3: Double-click run.cmd
+- Advanced lane preserved for developers
+- Added link to offline install docs
+
+**H6 - Documentation:**
+- Updated CLAUDE.md with Checkpoint H
+- Updated architecture diagram with scripts/ and docs/
+
+**Files added:**
+- `scripts/run.cmd` (Windows launcher)
+- `scripts/run.ps1` (PowerShell runner)
+- `scripts/install.cmd` (Setup launcher)
+- `scripts/install.ps1` (PowerShell installer)
+- `docs/OFFLINE_INSTALL.md` (Offline installation guide)
+
+**Files updated:**
+- `backend/src/index.ts` (static file serving, production mode)
+- `backend/src/database/db.ts` (data directory, CLAWD_DATA_DIR)
+- `package.json` (start:prod script, cross-env dependency)
+- `.gitignore` (data directory, logs directory)
+- `README.md` (two-lane Getting Started)
+- `CLAUDE.md` (this file)
+
+**Verified working:**
+- Production mode runs without Vite
+- Double-click launchers work
+- Database created under backend/data/
+- Backend binds to 127.0.0.1 only
+- No external network calls
+- Friendly error messages (no stack traces)
+
 ---
 
 ## Release Checklist
@@ -597,6 +669,7 @@ For production deployments, consider additional hardening based on your threat m
 | 2026-02-04 | Checkpoint E: Full UI implementation + bcrypt | AI Assistant |
 | 2026-02-05 | Checkpoint F: ClawdBot integration + action persistence | AI Assistant |
 | 2026-02-05 | Checkpoint G: Hardening + UX polish + packaging readiness | AI Assistant |
+| 2026-02-05 | Checkpoint H: Windows-friendly shipping experience | AI Assistant |
 
 ---
 
