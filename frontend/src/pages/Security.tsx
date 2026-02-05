@@ -22,6 +22,43 @@ interface CurrentProfile {
   warnings: string[];
 }
 
+interface SecurityReport {
+  generated_at: string;
+  profile: {
+    id: string;
+    name: string;
+    risk_level: string;
+    permissions: {
+      network_access: boolean;
+      external_ai: boolean;
+      system_access: boolean;
+    };
+  };
+  workspace: { path: string; enforced: boolean };
+  authentication: { admin_pin_enabled: boolean };
+  allowlists: { domains: string[] };
+  statistics: {
+    pending_approvals: number;
+    last_24h: {
+      approved_actions: number;
+      denied_actions: number;
+      security_violations: number;
+    };
+  };
+  recent_security_events: Array<{
+    type: string;
+    description: string;
+    time: string;
+  }>;
+  warnings: string[];
+  compliance: {
+    offline_mode: boolean;
+    localhost_only: boolean;
+    human_in_loop: boolean;
+    audit_trail: boolean;
+  };
+}
+
 export default function Security() {
   const [profiles, setProfiles] = useState<SecurityProfile[]>([]);
   const [currentProfile, setCurrentProfile] = useState<CurrentProfile | null>(null);
@@ -30,9 +67,12 @@ export default function Security() {
   const [error, setError] = useState<string | null>(null);
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showReportDialog, setShowReportDialog] = useState(false);
   const [confirmWarnings, setConfirmWarnings] = useState<string[]>([]);
   const [adminPin, setAdminPin] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [report, setReport] = useState<SecurityReport | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
 
   useEffect(() => {
     loadProfiles();
@@ -131,6 +171,35 @@ export default function Security() {
     return level;
   }
 
+  async function loadReport() {
+    setLoadingReport(true);
+    const result = await apiGet<{ report: SecurityReport }>('/api/security/report');
+    if (result.data) {
+      setReport(result.data.report);
+      setShowReportDialog(true);
+    }
+    setLoadingReport(false);
+  }
+
+  function exportReportJSON() {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `security-report-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function formatReportTime(timestamp: string): string {
+    try {
+      return new Date(timestamp).toLocaleString();
+    } catch {
+      return timestamp;
+    }
+  }
+
   if (loading) {
     return (
       <div>
@@ -187,6 +256,16 @@ export default function Security() {
             ) : (
               <span className="pin-disabled">No admin PIN - consider adding one in Settings</span>
             )}
+          </div>
+
+          <div className="card-actions" style={{ marginTop: 'var(--spacing-lg)', paddingTop: 'var(--spacing-md)', borderTop: '1px solid var(--color-border)' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={loadReport}
+              disabled={loadingReport}
+            >
+              {loadingReport ? 'Loading...' : 'View Security Posture Report'}
+            </button>
           </div>
         </div>
       )}
@@ -290,6 +369,117 @@ export default function Security() {
                 disabled={processing}
               >
                 {processing ? 'Processing...' : 'I Understand, Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security Report Dialog */}
+      {showReportDialog && report && (
+        <div className="dialog-overlay">
+          <div className="dialog dialog-report">
+            <div className="report-header">
+              <h3>Security Posture Report</h3>
+              <span className="report-time">Generated: {formatReportTime(report.generated_at)}</span>
+            </div>
+
+            <div className="report-section">
+              <h4>Profile</h4>
+              <div className="report-grid">
+                <div className="report-item">
+                  <span className="report-label">Active Profile</span>
+                  <span className="report-value">{report.profile.name}</span>
+                </div>
+                <div className="report-item">
+                  <span className="report-label">Risk Level</span>
+                  <span className={`report-value risk-indicator risk-${getRiskClass(report.profile.risk_level)}`}>
+                    {report.profile.risk_level}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="report-section">
+              <h4>Permissions</h4>
+              <div className="report-permissions">
+                <div className={`report-permission ${report.profile.permissions.network_access ? 'allowed' : 'blocked'}`}>
+                  Network: {report.profile.permissions.network_access ? 'Allowed' : 'Blocked'}
+                </div>
+                <div className={`report-permission ${report.profile.permissions.external_ai ? 'allowed' : 'blocked'}`}>
+                  External AI: {report.profile.permissions.external_ai ? 'Allowed' : 'Blocked'}
+                </div>
+                <div className={`report-permission ${report.profile.permissions.system_access ? 'allowed' : 'blocked'}`}>
+                  System Access: {report.profile.permissions.system_access ? 'Allowed' : 'Blocked'}
+                </div>
+              </div>
+            </div>
+
+            <div className="report-section">
+              <h4>Configuration</h4>
+              <div className="report-grid">
+                <div className="report-item">
+                  <span className="report-label">Workspace</span>
+                  <code className="report-value">{report.workspace.path}</code>
+                </div>
+                <div className="report-item">
+                  <span className="report-label">Admin PIN</span>
+                  <span className="report-value">{report.authentication.admin_pin_enabled ? 'Enabled' : 'Not Set'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="report-section">
+              <h4>Statistics (Last 24 Hours)</h4>
+              <div className="report-stats">
+                <div className="report-stat">
+                  <span className="stat-number">{report.statistics.pending_approvals}</span>
+                  <span className="stat-label">Pending</span>
+                </div>
+                <div className="report-stat">
+                  <span className="stat-number success">{report.statistics.last_24h.approved_actions}</span>
+                  <span className="stat-label">Approved</span>
+                </div>
+                <div className="report-stat">
+                  <span className="stat-number warning">{report.statistics.last_24h.denied_actions}</span>
+                  <span className="stat-label">Denied</span>
+                </div>
+                <div className="report-stat">
+                  <span className="stat-number danger">{report.statistics.last_24h.security_violations}</span>
+                  <span className="stat-label">Violations</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="report-section">
+              <h4>Compliance</h4>
+              <div className="report-compliance">
+                <div className={`compliance-item ${report.compliance.offline_mode ? 'pass' : 'warn'}`}>
+                  {report.compliance.offline_mode ? '✓' : '!'} Offline Mode
+                </div>
+                <div className="compliance-item pass">✓ Localhost Only</div>
+                <div className="compliance-item pass">✓ Human-in-the-Loop</div>
+                <div className="compliance-item pass">✓ Audit Trail</div>
+              </div>
+            </div>
+
+            {report.warnings.length > 0 && (
+              <div className="report-section">
+                <h4>Warnings</h4>
+                <div className="report-warnings">
+                  {report.warnings.map((w, i) => (
+                    <div key={i} className="warning-item">{w}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="dialog-actions">
+              <button className="btn btn-secondary" onClick={exportReportJSON}>
+                Export JSON
+              </button>
+              <button className="btn btn-primary" onClick={() => setShowReportDialog(false)}>
+                Close
               </button>
             </div>
           </div>

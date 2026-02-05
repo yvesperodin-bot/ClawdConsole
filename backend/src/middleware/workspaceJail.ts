@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { getSetupState, logAudit } from '../database/db.js';
 
 /**
@@ -10,9 +11,50 @@ import { getSetupState, logAudit } from '../database/db.js';
  * Blocked patterns:
  * - Absolute paths outside workspace
  * - Path traversal attempts (..)
+ * - URL-encoded traversal attempts
+ * - UNC paths (\\server\share)
  * - System directories
  * - Symbolic links pointing outside workspace
  */
+
+/**
+ * Decode URL-encoded characters in path
+ * Detects attempts to bypass validation using %2e%2e etc.
+ */
+function decodePathSegments(inputPath: string): string {
+  try {
+    // Decode multiple times to catch double-encoding
+    let decoded = inputPath;
+    let prevDecoded = '';
+    let iterations = 0;
+    const MAX_ITERATIONS = 3;
+
+    while (decoded !== prevDecoded && iterations < MAX_ITERATIONS) {
+      prevDecoded = decoded;
+      decoded = decodeURIComponent(decoded);
+      iterations++;
+    }
+    return decoded;
+  } catch {
+    // If decoding fails, return original
+    return inputPath;
+  }
+}
+
+/**
+ * Check if path is a UNC path (Windows network share)
+ */
+function isUNCPath(inputPath: string): boolean {
+  // UNC paths start with \\ or //
+  return /^(\\\\|\/\/)/.test(inputPath);
+}
+
+/**
+ * Normalize path separators (convert backslashes to forward slashes)
+ */
+function normalizeSeparators(inputPath: string): string {
+  return inputPath.replace(/\\/g, '/');
+}
 
 // System directories that should NEVER be accessible
 const BLOCKED_DIRECTORIES = [
@@ -69,15 +111,39 @@ export function validatePath(requestedPath: string): JailCheckResult {
 
   const workspacePath = setupState.workspace_path;
 
-  // Normalize the requested path
+  // Step 1: Decode URL-encoded characters to catch bypass attempts
+  const decodedPath = decodePathSegments(requestedPath);
+
+  // Step 2: Check for UNC paths (network shares) - BLOCKED by default
+  if (isUNCPath(decodedPath) || isUNCPath(requestedPath)) {
+    logAudit('SECURITY', 'UNC_PATH_BLOCKED', `UNC/network path blocked: ${requestedPath}`, { requestedPath }, 'HIGH');
+    return {
+      allowed: false,
+      reason: 'Network paths (UNC) are not allowed. Please use local paths within your workspace.'
+    };
+  }
+
+  // Step 3: Normalize separators for cross-platform consistency
+  const normalizedSeparators = normalizeSeparators(decodedPath);
+
+  // Step 4: Check for path traversal in both original and decoded paths
+  if (requestedPath.includes('..') || decodedPath.includes('..') || normalizedSeparators.includes('..')) {
+    logAudit('SECURITY', 'PATH_TRAVERSAL_BLOCKED', `Path traversal attempt blocked: ${requestedPath}`, { requestedPath, decodedPath }, 'HIGH');
+    return {
+      allowed: false,
+      reason: 'Path traversal is not allowed. Please use paths within your workspace.'
+    };
+  }
+
+  // Step 5: Normalize the requested path
   let normalizedPath: string;
 
   try {
     // Handle both absolute and relative paths
-    if (path.isAbsolute(requestedPath)) {
-      normalizedPath = path.normalize(requestedPath);
+    if (path.isAbsolute(decodedPath)) {
+      normalizedPath = path.normalize(decodedPath);
     } else {
-      normalizedPath = path.normalize(path.join(workspacePath, requestedPath));
+      normalizedPath = path.normalize(path.join(workspacePath, decodedPath));
     }
   } catch (error) {
     logAudit('SECURITY', 'PATH_VALIDATION_FAILED', `Invalid path format: ${requestedPath}`, { error: String(error) }, 'HIGH');
@@ -87,16 +153,7 @@ export function validatePath(requestedPath: string): JailCheckResult {
     };
   }
 
-  // Check for path traversal attempts
-  if (requestedPath.includes('..')) {
-    logAudit('SECURITY', 'PATH_TRAVERSAL_BLOCKED', `Path traversal attempt blocked: ${requestedPath}`, { requestedPath }, 'HIGH');
-    return {
-      allowed: false,
-      reason: 'Path traversal is not allowed. Please use paths within your workspace.'
-    };
-  }
-
-  // Check if path is within workspace
+  // Step 6: Check if path is within workspace using relative path check
   const relative = path.relative(workspacePath, normalizedPath);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     logAudit('SECURITY', 'WORKSPACE_ESCAPE_BLOCKED', `Attempted access outside workspace: ${normalizedPath}`, { requestedPath, normalizedPath, workspacePath }, 'HIGH');
@@ -106,7 +163,29 @@ export function validatePath(requestedPath: string): JailCheckResult {
     };
   }
 
-  // Check against blocked system directories
+  // Step 7: Resolve realpath to check for symlink escapes (if path exists)
+  try {
+    if (fs.existsSync(normalizedPath)) {
+      const realPath = fs.realpathSync(normalizedPath);
+      const realRelative = path.relative(workspacePath, realPath);
+
+      if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
+        logAudit('SECURITY', 'SYMLINK_ESCAPE_BLOCKED', `Symlink escape attempt blocked: ${normalizedPath} -> ${realPath}`, { requestedPath, normalizedPath, realPath, workspacePath }, 'HIGH');
+        return {
+          allowed: false,
+          reason: 'This path links to a location outside your workspace. Symlink escapes are not allowed.'
+        };
+      }
+    }
+  } catch (error) {
+    // If we can't resolve the realpath, the file may not exist yet (which is OK for write operations)
+    // But log for awareness
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logAudit('SECURITY', 'REALPATH_CHECK_FAILED', `Could not verify realpath: ${normalizedPath}`, { error: String(error) }, 'MEDIUM');
+    }
+  }
+
+  // Step 8: Check against blocked system directories
   const normalizedLower = normalizedPath.toLowerCase();
   for (const blockedDir of BLOCKED_DIRECTORIES) {
     if (normalizedLower.startsWith(blockedDir.toLowerCase())) {
@@ -118,7 +197,7 @@ export function validatePath(requestedPath: string): JailCheckResult {
     }
   }
 
-  // Check against blocked file patterns
+  // Step 9: Check against blocked file patterns
   for (const pattern of BLOCKED_PATTERNS) {
     if (pattern.test(normalizedPath)) {
       logAudit('SECURITY', 'SENSITIVE_FILE_BLOCKED', `Attempted access to sensitive file: ${normalizedPath}`, { requestedPath, pattern: pattern.source }, 'HIGH');

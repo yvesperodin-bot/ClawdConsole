@@ -247,6 +247,112 @@ router.delete('/pin', (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/security/report
+ * Security Posture Report (v1)
+ *
+ * Returns a comprehensive view of the current security state:
+ * - Active profile and its permissions
+ * - Workspace path
+ * - Admin PIN status
+ * - Domain allowlists
+ * - Action statistics (24h)
+ * - Security violation counts (24h)
+ */
+router.get('/report', (req: Request, res: Response) => {
+  const state = getSetupState()!;
+  const profile = getSecurityProfile(state.security_profile);
+
+  if (!profile) {
+    return res.status(500).json({
+      error: 'Configuration error',
+      message: 'Current security profile not found.',
+    });
+  }
+
+  const db = require('../database/db.js').getDatabase();
+
+  // Get action stats for last 24 hours
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const pendingCount = db.prepare(`
+    SELECT COUNT(*) as count FROM pending_actions WHERE status = 'PENDING'
+  `).get().count;
+
+  const approvedCount24h = db.prepare(`
+    SELECT COUNT(*) as count FROM pending_actions
+    WHERE status = 'APPROVED' AND resolved_at >= ?
+  `).get(oneDayAgo).count;
+
+  const deniedCount24h = db.prepare(`
+    SELECT COUNT(*) as count FROM pending_actions
+    WHERE status = 'DENIED' AND resolved_at >= ?
+  `).get(oneDayAgo).count;
+
+  // Get security violations (HIGH risk audit entries)
+  const violations24h = db.prepare(`
+    SELECT COUNT(*) as count FROM audit_log
+    WHERE risk_level = 'HIGH' AND created_at >= ?
+  `).get(oneDayAgo).count;
+
+  // Get recent security events
+  const recentSecurityEvents = db.prepare(`
+    SELECT event_type, description, created_at FROM audit_log
+    WHERE category = 'SECURITY' AND created_at >= ?
+    ORDER BY created_at DESC
+    LIMIT 5
+  `).all(oneDayAgo);
+
+  // Build report
+  const report = {
+    generated_at: new Date().toISOString(),
+    profile: {
+      id: profile.id,
+      name: profile.name,
+      risk_level: profile.risk_level,
+      permissions: {
+        network_access: profile.allow_network,
+        external_ai: profile.allow_external_ai,
+        system_access: profile.allow_system_access,
+      },
+    },
+    workspace: {
+      path: state.workspace_path,
+      enforced: true,
+    },
+    authentication: {
+      admin_pin_enabled: !!state.admin_pin_hash,
+    },
+    allowlists: {
+      domains: [], // TODO: Implement domain allowlist in future version
+    },
+    statistics: {
+      pending_approvals: pendingCount,
+      last_24h: {
+        approved_actions: approvedCount24h,
+        denied_actions: deniedCount24h,
+        security_violations: violations24h,
+      },
+    },
+    recent_security_events: recentSecurityEvents.map((e: any) => ({
+      type: e.event_type,
+      description: e.description,
+      time: e.created_at,
+    })),
+    warnings: getProfileWarnings(profile),
+    compliance: {
+      offline_mode: !profile.allow_network,
+      localhost_only: true,
+      human_in_loop: true,
+      audit_trail: true,
+    },
+  };
+
+  logAudit('SECURITY', 'REPORT_GENERATED', 'Security posture report generated', null, 'LOW');
+
+  res.json({ report });
+});
+
+/**
  * Get warnings for a security profile
  */
 function getProfileWarnings(profile: ReturnType<typeof getSecurityProfile>): string[] {

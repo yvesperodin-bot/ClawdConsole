@@ -15,6 +15,42 @@ import { validatePath } from '../middleware/workspaceJail.js';
 
 const router = Router();
 
+/**
+ * In-flight lock to prevent duplicate message sends per conversation.
+ * Key: conversationId, Value: timestamp when lock acquired
+ * Locks expire after 30 seconds (in case of crash/timeout)
+ */
+const conversationLocks = new Map<string, number>();
+const LOCK_TIMEOUT_MS = 30000;
+
+function acquireLock(conversationId: string): boolean {
+  const now = Date.now();
+  const existingLock = conversationLocks.get(conversationId);
+
+  // Check if there's an active lock
+  if (existingLock && (now - existingLock) < LOCK_TIMEOUT_MS) {
+    return false; // Lock is held
+  }
+
+  // Acquire lock
+  conversationLocks.set(conversationId, now);
+  return true;
+}
+
+function releaseLock(conversationId: string): void {
+  conversationLocks.delete(conversationId);
+}
+
+// Cleanup stale locks periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, timestamp] of conversationLocks.entries()) {
+    if ((now - timestamp) >= LOCK_TIMEOUT_MS) {
+      conversationLocks.delete(id);
+    }
+  }
+}, 60000); // Clean up every minute
+
 // Middleware to check setup completion
 router.use((req: Request, res: Response, next) => {
   const state = getSetupState();
@@ -101,11 +137,13 @@ router.get('/conversations/:id', (req: Request, res: Response) => {
  * Send a message in a conversation
  *
  * Flow:
- * 1. Save user message
- * 2. If ClawdBot reachable: forward to ClawdBot /chat
- * 3. Save assistant response
- * 4. If proposedActions returned: persist to pending_actions table
- * 5. If ClawdBot unreachable: respond with calm local message
+ * 1. Acquire conversation lock (prevents double-send)
+ * 2. Save user message
+ * 3. If ClawdBot reachable: forward to ClawdBot /chat
+ * 4. Save assistant response
+ * 5. If proposedActions returned: persist to pending_actions table
+ * 6. If ClawdBot unreachable: respond with calm local message
+ * 7. Release lock
  */
 router.post('/conversations/:id/messages', async (req: Request, res: Response) => {
   const { id: conversationId } = req.params;
@@ -128,6 +166,14 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
     });
   }
 
+  // Try to acquire lock - prevent double-send
+  if (!acquireLock(conversationId)) {
+    return res.status(429).json({
+      error: 'Already processing',
+      message: 'A message is already being sent. Please wait.',
+    });
+  }
+
   // Save user message first (always persisted)
   const userMessageId = crypto.randomUUID();
   const userMessage = addMessage(userMessageId, conversationId, 'user', content.trim());
@@ -143,6 +189,7 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
 
     logAudit('CHAT', 'OFFLINE_MODE', 'Message saved while ClawdBot unavailable', { conversationId }, 'INFO');
 
+    releaseLock(conversationId);
     return res.json({
       user_message: {
         id: userMessage.id,
@@ -170,6 +217,7 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
     const errorMessageId = crypto.randomUUID();
     const errorMessage = addMessage(errorMessageId, conversationId, 'system', errorContent);
 
+    releaseLock(conversationId);
     return res.json({
       user_message: {
         id: userMessage.id,
@@ -244,6 +292,7 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
     }
   }
 
+  releaseLock(conversationId);
   res.json({
     user_message: {
       id: userMessage.id,

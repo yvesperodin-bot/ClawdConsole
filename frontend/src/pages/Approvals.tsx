@@ -40,6 +40,7 @@ export default function Approvals() {
   const [pinValue, setPinValue] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<{ summary: string; updatedFiles?: string[] } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'warning' } | null>(null);
 
   useEffect(() => {
     loadPendingActions();
@@ -102,6 +103,9 @@ export default function Approvals() {
         summary: result.data.result.summary,
         updatedFiles: result.data.result.updated_files,
       });
+      showToast('Action approved and executed successfully', 'success');
+    } else if (result.data?.success) {
+      showToast('Action approved', 'success');
     }
 
     // Close PIN dialog if open
@@ -113,7 +117,19 @@ export default function Approvals() {
     if (showHistory) await loadHistory();
 
     setProcessing(null);
-    setSelectedAction(null);
+
+    // Focus on next pending action if available
+    const currentIndex = pendingActions.findIndex(a => a.id === id);
+    if (currentIndex >= 0 && pendingActions.length > 1) {
+      const nextAction = pendingActions[currentIndex + 1] || pendingActions[currentIndex - 1];
+      if (nextAction && nextAction.id !== id) {
+        setSelectedAction(nextAction);
+      } else {
+        setSelectedAction(null);
+      }
+    } else {
+      setSelectedAction(null);
+    }
   }
 
   async function handlePinSubmit() {
@@ -131,18 +147,64 @@ export default function Approvals() {
     setLastResult(null);
   }
 
+  function showToast(message: string, type: 'success' | 'info' | 'warning' = 'info') {
+    setToast({ message, type });
+    // Auto-dismiss after 4 seconds
+    setTimeout(() => setToast(null), 4000);
+  }
+
+  /**
+   * Get explanation text for what happens when you approve this action type
+   */
+  function getActionExplanation(actionType: string): string {
+    const explanations: Record<string, string> = {
+      FILE_READ: 'The AI will read the contents of this file and use it for context.',
+      FILE_WRITE: 'The AI will modify or create this file with new content.',
+      FILE_DELETE: 'This file will be permanently deleted from your workspace.',
+      LIST_DIR: 'The AI will see the list of files in this directory.',
+      CREATE_FILE: 'A new file will be created at this location.',
+      RUN_COMMAND: 'This command will execute on your system. Review carefully before approving.',
+      COMMAND_EXECUTE: 'This command will execute on your system. Review carefully before approving.',
+      NETWORK_REQUEST: 'A network request will be made to an external service.',
+    };
+    return explanations[actionType] || 'This action will be executed on your behalf.';
+  }
+
+  /**
+   * Check if action type is dangerous and requires extra caution
+   */
+  function isDangerousAction(actionType: string): boolean {
+    return ['RUN_COMMAND', 'COMMAND_EXECUTE', 'FILE_DELETE'].includes(actionType);
+  }
+
   async function denyAction(id: string) {
     setProcessing(id);
     const result = await apiPost<{ success: boolean }>(
       `/api/actions/${id}/deny`,
       {}
     );
-    if (result.data?.success || result.error) {
-      await loadPendingActions();
-      if (showHistory) await loadHistory();
+
+    if (result.data?.success) {
+      showToast('Action denied', 'info');
     }
+
+    await loadPendingActions();
+    if (showHistory) await loadHistory();
+
     setProcessing(null);
-    setSelectedAction(null);
+
+    // Focus on next pending action if available
+    const currentIndex = pendingActions.findIndex(a => a.id === id);
+    if (currentIndex >= 0 && pendingActions.length > 1) {
+      const nextAction = pendingActions[currentIndex + 1] || pendingActions[currentIndex - 1];
+      if (nextAction && nextAction.id !== id) {
+        setSelectedAction(nextAction);
+      } else {
+        setSelectedAction(null);
+      }
+    } else {
+      setSelectedAction(null);
+    }
   }
 
   function toggleHistory() {
@@ -192,6 +254,13 @@ export default function Approvals() {
 
   return (
     <div>
+      {/* Toast notification */}
+      {toast && (
+        <div className={`toast toast-${toast.type}`}>
+          {toast.message}
+        </div>
+      )}
+
       {/* PIN Dialog */}
       {pinDialogAction && (
         <div className="dialog-overlay">
@@ -303,6 +372,19 @@ export default function Approvals() {
 
               {selectedAction?.id === action.id && (
                 <div className="action-card-details">
+                  {/* Dangerous action warning */}
+                  {isDangerousAction(action.action_type) && (
+                    <div className="action-danger-warning">
+                      <strong>Caution:</strong> This is a high-impact action. Please review carefully before approving.
+                    </div>
+                  )}
+
+                  {/* What happens explanation */}
+                  <div className="action-explanation">
+                    <strong>What happens when you approve:</strong>
+                    <p>{getActionExplanation(action.action_type)}</p>
+                  </div>
+
                   <div className="action-detail">
                     <label>Target:</label>
                     <code>{action.target}</code>
@@ -322,7 +404,7 @@ export default function Approvals() {
                       Deny
                     </button>
                     <button
-                      className="btn btn-success"
+                      className={`btn ${isDangerousAction(action.action_type) ? 'btn-warning' : 'btn-success'}`}
                       onClick={() => approveAction(action.id)}
                       disabled={processing === action.id}
                     >

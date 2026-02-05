@@ -5,7 +5,7 @@ This document provides guidance for AI assistants working with the Clawd Console
 ## Project Overview
 
 **Repository**: ClawdConsole
-**Status**: Active development (Checkpoint E complete)
+**Status**: Active development (Checkpoint G complete)
 **Purpose**: Local-first AI control interface for ClawdBot
 
 ### Non-Negotiable Principles
@@ -465,8 +465,123 @@ npm run dev
 - TypeScript compiles without errors
 - All security checks enforced
 
-### Checkpoint G: Final Cleanup
-*Pending*
+### Checkpoint G: Hardening + UX Polish + Packaging Readiness ✓
+**What changed:**
+
+**G1 - Repository Hygiene:**
+- Enhanced `.gitignore` with comprehensive exclusions
+- Verified no artifacts (node_modules, dist, db) committed
+- All tracked files are source code only
+
+**G2 - Reliability + Rate Limits:**
+- Added in-flight locks for chat messages (per conversation)
+- Added in-flight locks for action approvals (per action)
+- Prevents double-send/double-approve from rapid clicks
+- Locks auto-expire after 30 seconds
+- Returns friendly "Already processing…" response
+
+**G3 - Stronger Path Validation:**
+- URL-encoded traversal detection (`%2e%2e`)
+- UNC path rejection (`\\server\share`)
+- Symlink escape detection (realpath resolution)
+- Mixed slash normalization
+- Added unit tests for workspace jail edge cases
+
+**G4 - Security Posture Report:**
+- New endpoint: `GET /api/security/report`
+- Returns: active profile, workspace, PIN status, allowlists, 24h stats
+- Frontend: "View Security Posture Report" modal in Security page
+- Export to JSON functionality
+
+**G5 - Approvals UX Improvements:**
+- "What happens when you approve" explanation per action type
+- Dangerous action warnings (red callout for commands)
+- Toast notifications after approve/deny
+- Auto-focus on next pending action
+- Warning-colored approve button for high-impact actions
+
+**G6 - Documentation Polish:**
+- Added comprehensive README.md at repo root
+- Added Release Checklist section (below)
+- Added Threat Model Summary section (below)
+
+**Files added:**
+- `backend/src/middleware/workspaceJail.test.ts` (unit tests)
+
+**Files updated:**
+- `.gitignore` (enhanced exclusions)
+- `backend/src/routes/chat.ts` (in-flight locks)
+- `backend/src/routes/actions.ts` (in-flight locks)
+- `backend/src/routes/security.ts` (report endpoint)
+- `backend/src/middleware/workspaceJail.ts` (stronger validation)
+- `frontend/src/pages/Security.tsx` (report dialog)
+- `frontend/src/pages/Approvals.tsx` (UX improvements)
+- `frontend/src/index.css` (new component styles)
+- `README.md` (full documentation)
+- `CLAUDE.md` (this file)
+
+**Verified working:**
+- TypeScript compiles without errors
+- No artifacts in git
+- In-flight locks prevent double operations
+- Security report generates and exports
+- Approvals show explanations and toasts
+- Documentation complete
+
+---
+
+## Release Checklist
+
+Before releasing, verify the following:
+
+- [ ] **Offline Mode**: App works without internet connection
+- [ ] **Localhost Binding**: Backend only binds to 127.0.0.1:3001
+- [ ] **No Telemetry**: No analytics, tracking, or external calls
+- [ ] **Setup Wizard**: First-run wizard completes successfully
+- [ ] **Actions Gate**: No action executes without user approval
+- [ ] **Workspace Jail**: File operations restricted to workspace
+- [ ] **PIN Protection**: Admin PIN protects sensitive operations
+- [ ] **Audit Trail**: All security events logged
+- [ ] **Build Clean**: `npm run build` succeeds with no warnings
+- [ ] **No Secrets**: No credentials, keys, or .env files committed
+
+---
+
+## Threat Model Summary
+
+### Trust Boundaries
+
+Clawd Console operates within a local-first trust model:
+
+1. **User → Console**: Full trust. The user controls all settings, approves all actions, and has physical access to the machine.
+
+2. **Console → ClawdBot**: Partial trust. ClawdBot (localhost:7331) can propose actions, but every action must pass through the Console's security checks and user approval before execution.
+
+3. **Console → File System**: Restricted. All file operations are confined to the user-configured workspace directory. System directories, sensitive files, and symlink escapes are blocked.
+
+4. **Console → Network**: Profile-controlled. Network access is blocked by default (AIR_GAPPED profile). Only CONNECTED and POWER_USER profiles allow network operations, and only with explicit approval.
+
+### Key Mitigations
+
+- **Human-in-the-loop**: No AI action executes automatically. Every proposed action requires explicit user approval.
+
+- **Workspace jail**: Path traversal, UNC paths, symlink escapes, and system directory access are blocked at the middleware level.
+
+- **Security profiles**: Risk is tiered. Users must consciously upgrade to higher-risk profiles, with warnings and PIN verification.
+
+- **PIN gating**: Critical operations (command execution, profile upgrades, setup reset) require admin PIN when configured.
+
+- **Audit logging**: Every security-relevant event is logged with timestamp, category, and risk level for forensic review.
+
+### Out of Scope
+
+This version does not protect against:
+- Physical access attacks (user has full machine access)
+- Malicious ClawdBot implementations (trust extends to localhost:7331)
+- Supply chain attacks on npm dependencies (standard Node.js risk)
+- Memory-level attacks (SQLite data is not encrypted at rest)
+
+For production deployments, consider additional hardening based on your threat model.
 
 ---
 
@@ -481,6 +596,7 @@ npm run dev
 | 2026-02-04 | Checkpoint D: First-Run Setup Wizard | AI Assistant |
 | 2026-02-04 | Checkpoint E: Full UI implementation + bcrypt | AI Assistant |
 | 2026-02-05 | Checkpoint F: ClawdBot integration + action persistence | AI Assistant |
+| 2026-02-05 | Checkpoint G: Hardening + UX polish + packaging readiness | AI Assistant |
 
 ---
 

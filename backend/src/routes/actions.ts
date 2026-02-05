@@ -17,6 +17,42 @@ import { validatePath, validateCommand } from '../middleware/workspaceJail.js';
 const router = Router();
 
 /**
+ * In-flight lock to prevent duplicate approvals/denials per action.
+ * Key: actionId, Value: timestamp when lock acquired
+ * Locks expire after 30 seconds (in case of crash/timeout)
+ */
+const actionLocks = new Map<string, number>();
+const LOCK_TIMEOUT_MS = 30000;
+
+function acquireActionLock(actionId: string): boolean {
+  const now = Date.now();
+  const existingLock = actionLocks.get(actionId);
+
+  // Check if there's an active lock
+  if (existingLock && (now - existingLock) < LOCK_TIMEOUT_MS) {
+    return false; // Lock is held
+  }
+
+  // Acquire lock
+  actionLocks.set(actionId, now);
+  return true;
+}
+
+function releaseActionLock(actionId: string): void {
+  actionLocks.delete(actionId);
+}
+
+// Cleanup stale locks periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, timestamp] of actionLocks.entries()) {
+    if ((now - timestamp) >= LOCK_TIMEOUT_MS) {
+      actionLocks.delete(id);
+    }
+  }
+}, 60000); // Clean up every minute
+
+/**
  * Action Types and their security requirements:
  * - FILE_READ, FILE_WRITE, FILE_DELETE, LIST_DIR, CREATE_FILE: Workspace jail enforced
  * - RUN_COMMAND: Requires POWER_USER profile + PIN verification
@@ -153,9 +189,18 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { admin_pin } = req.body;
 
+  // Try to acquire lock - prevent double-approve
+  if (!acquireActionLock(id)) {
+    return res.status(429).json({
+      error: 'Already processing',
+      message: 'This action is already being processed. Please wait.',
+    });
+  }
+
   // Get the action
   const action = getPendingAction(id);
   if (!action || action.status !== 'PENDING') {
+    releaseActionLock(id);
     return res.status(404).json({
       error: 'Not found',
       message: 'This action is no longer pending or does not exist.',
@@ -171,6 +216,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     if (!pathCheck.allowed) {
       denyActionWithReason(id, `Security: ${pathCheck.reason}`);
       logAudit('SECURITY', 'APPROVAL_BLOCKED', `Action blocked by workspace jail: ${action.summary}`, { id, reason: pathCheck.reason }, 'HIGH');
+      releaseActionLock(id);
       return res.status(403).json({
         error: 'Action blocked',
         message: `This action was blocked for your safety: ${pathCheck.reason}`,
@@ -184,6 +230,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     if (!profile || !profile.allow_system_access) {
       denyActionWithReason(id, 'Security: Command execution not allowed in current profile');
       logAudit('SECURITY', 'APPROVAL_BLOCKED', `Command execution blocked: profile ${state.security_profile} does not allow system access`, { id }, 'HIGH');
+      releaseActionLock(id);
       return res.status(403).json({
         error: 'Profile restriction',
         message: 'Command execution is only allowed in Power User mode. Please change your security profile in Settings.',
@@ -193,6 +240,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     // Must verify PIN if set
     if (state.admin_pin_hash) {
       if (!admin_pin) {
+        releaseActionLock(id);
         return res.status(403).json({
           error: 'PIN required',
           message: 'Your admin PIN is required to approve command execution.',
@@ -203,6 +251,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
       const pinValid = await bcrypt.compare(admin_pin, state.admin_pin_hash);
       if (!pinValid) {
         logAudit('SECURITY', 'INVALID_PIN', 'Invalid PIN for command approval', { id }, 'HIGH');
+        releaseActionLock(id);
         return res.status(403).json({
           error: 'Invalid PIN',
           message: 'The admin PIN you entered is incorrect.',
@@ -215,6 +264,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     if (!commandCheck.allowed) {
       denyActionWithReason(id, `Security: ${commandCheck.reason}`);
       logAudit('SECURITY', 'APPROVAL_BLOCKED', `Command blocked: ${commandCheck.reason}`, { id }, 'HIGH');
+      releaseActionLock(id);
       return res.status(403).json({
         error: 'Command blocked',
         message: commandCheck.reason,
@@ -227,6 +277,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     if (!profile || !profile.allow_network) {
       denyActionWithReason(id, 'Security: Network access not allowed in current profile');
       logAudit('SECURITY', 'APPROVAL_BLOCKED', `Network request blocked: profile ${state.security_profile} does not allow network access`, { id }, 'HIGH');
+      releaseActionLock(id);
       return res.status(403).json({
         error: 'Profile restriction',
         message: 'Network requests are not allowed in your current security profile.',
@@ -240,6 +291,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
 
     if (!clawdResult.success) {
       logAudit('ACTION', 'EXECUTION_FAILED', `ClawdBot execution failed: ${action.summary}`, { id, error: clawdResult.error }, 'MEDIUM');
+      releaseActionLock(id);
       return res.status(502).json({
         error: 'Execution failed',
         message: clawdResult.error || 'ClawdBot could not execute the action. Please try again.',
@@ -252,6 +304,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
 
     logAudit('ACTION', 'EXECUTED', `Action executed: ${action.summary}`, { id, resultSummary, updatedFiles: clawdResult.updatedFiles }, 'INFO');
 
+    releaseActionLock(id);
     return res.json({
       success: true,
       message: 'Action approved and executed.',
@@ -273,6 +326,7 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
   // No ClawdBot action ID - just mark as approved (manual action)
   const resolved = approveActionWithResult(id, 'Approved by user');
 
+  releaseActionLock(id);
   res.json({
     success: true,
     message: 'Action approved.',
@@ -295,9 +349,18 @@ router.post('/:id/deny', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { reason } = req.body;
 
+  // Try to acquire lock - prevent double-deny
+  if (!acquireActionLock(id)) {
+    return res.status(429).json({
+      error: 'Already processing',
+      message: 'This action is already being processed. Please wait.',
+    });
+  }
+
   // Get the action
   const action = getPendingAction(id);
   if (!action || action.status !== 'PENDING') {
+    releaseActionLock(id);
     return res.status(404).json({
       error: 'Not found',
       message: 'This action is no longer pending or does not exist.',
@@ -312,6 +375,7 @@ router.post('/:id/deny', async (req: Request, res: Response) => {
   // Mark as denied with reason
   const resolved = denyActionWithReason(id, reason || null);
 
+  releaseActionLock(id);
   res.json({
     success: true,
     message: 'Action denied.',

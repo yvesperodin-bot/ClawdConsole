@@ -2001,3 +2001,238 @@ body {
   color: var(--color-danger);
   font-size: 12px;
 }
+
+/* Security Report Dialog */
+.dialog-report {
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.report-header h3 {
+  margin: 0;
+}
+
+.report-time {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.report-section {
+  margin-bottom: var(--spacing-lg);
+}
+
+.report-section h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-md);
+}
+
+.report-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.report-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.report-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.report-permissions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.report-permission {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.report-permission.allowed {
+  background-color: #e8f5e9;
+  color: var(--color-success);
+}
+
+.report-permission.blocked {
+  background-color: var(--color-bg);
+  color: var(--color-text-muted);
+}
+
+.report-stats {
+  display: flex;
+  gap: var(--spacing-md);
+}
+
+.report-stat {
+  flex: 1;
+  text-align: center;
+  padding: var(--spacing-md);
+  background-color: var(--color-bg);
+  border-radius: var(--radius-md);
+}
+
+.stat-number {
+  display: block;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.stat-number.success {
+  color: var(--color-success);
+}
+
+.stat-number.warning {
+  color: var(--color-warning);
+}
+
+.stat-number.danger {
+  color: var(--color-danger);
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.report-compliance {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.compliance-item {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+}
+
+.compliance-item.pass {
+  color: var(--color-success);
+}
+
+.compliance-item.warn {
+  color: var(--color-warning);
+}
+
+.report-warnings {
+  background-color: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+}
+
+/* Toast notifications */
+.toast {
+  position: fixed;
+  top: var(--spacing-lg);
+  right: var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  z-index: 1100;
+  font-size: 14px;
+  font-weight: 500;
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.toast-success {
+  background-color: #e8f5e9;
+  color: var(--color-success);
+  border: 1px solid var(--color-success);
+}
+
+.toast-info {
+  background-color: #e8f4fd;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.toast-warning {
+  background-color: #fff8e1;
+  color: #856404;
+  border: 1px solid var(--color-warning);
+}
+
+/* Action explanation */
+.action-explanation {
+  background-color: #e8f4fd;
+  border: 1px solid #b6d4fe;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  font-size: 13px;
+}
+
+.action-explanation strong {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+  color: var(--color-text);
+}
+
+.action-explanation p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+/* Dangerous action warning */
+.action-danger-warning {
+  background-color: #fee;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  font-size: 13px;
+  color: var(--color-danger);
+}
+
+/* Warning button (for dangerous actions) */
+.btn-warning {
+  background-color: var(--color-warning);
+  color: #000;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background-color: #e69500;
+}

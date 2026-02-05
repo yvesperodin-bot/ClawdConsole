@@ -1,37 +1,68 @@
 # Dependencies
 node_modules/
+**/node_modules/
 
 # Build outputs
 dist/
 build/
+frontend/dist/
+backend/dist/
+*.tsbuildinfo
 
-# Database (local only)
+# Database (local only - NEVER commit)
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+backend/*.db
+backend/data/*.db
 
-# Environment files (should never be committed)
+# Environment files (NEVER commit)
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 
-# IDE
+# IDE / Editor
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+.project
+.classpath
 
 # OS files
 .DS_Store
 Thumbs.db
+Desktop.ini
 
 # Logs
 *.log
 npm-debug.log*
-
-# Lock files (optional - can be committed)
-# package-lock.json
+yarn-debug.log*
+yarn-error.log*
 
 # Test coverage
 coverage/
+.nyc_output/
+
+# Exports (user data - never commit)
+exports/
+exports/*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Lock files are committed for reproducible builds
+# Uncomment to ignore:
+# package-lock.json
+
+# Large files that should never be committed
+*.sql.gz
+*.tar.gz
+*.zip
