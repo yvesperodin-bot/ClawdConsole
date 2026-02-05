@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { apiGet, apiPost, apiDelete } from '../services/api';
 
 /**
@@ -19,6 +20,15 @@ interface Message {
   created_at: string;
 }
 
+interface ProposedAction {
+  id: string;
+  action_type: string;
+  target: string;
+  summary: string;
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
+  preview: string | null;
+}
+
 export default function Chat() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
@@ -27,6 +37,8 @@ export default function Chat() {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proposedActions, setProposedActions] = useState<ProposedAction[]>([]);
+  const [clawdbotAvailable, setClawdbotAvailable] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,6 +75,8 @@ export default function Chat() {
   async function selectConversation(conversation: Conversation) {
     setActiveConversation(conversation);
     setMessages([]);
+    setProposedActions([]);
+    setClawdbotAvailable(null);
     setLoading(true);
     setError(null);
 
@@ -107,6 +121,8 @@ export default function Chat() {
     const result = await apiPost<{
       user_message: Message;
       assistant_message: Message;
+      clawdbot_available: boolean;
+      proposed_actions: ProposedAction[];
       error?: string;
     }>(`/api/chat/conversations/${activeConversation.id}/messages`, { content });
 
@@ -128,6 +144,14 @@ export default function Chat() {
         result.data!.user_message,
         result.data!.assistant_message,
       ]);
+
+      // Update ClawdBot availability status
+      setClawdbotAvailable(result.data.clawdbot_available);
+
+      // Update proposed actions
+      if (result.data.proposed_actions && result.data.proposed_actions.length > 0) {
+        setProposedActions(prev => [...prev, ...result.data!.proposed_actions]);
+      }
     }
 
     setSending(false);
@@ -146,6 +170,24 @@ export default function Chat() {
     } catch {
       return '';
     }
+  }
+
+  function formatActionType(type: string): string {
+    const typeMap: Record<string, string> = {
+      FILE_READ: 'Read File',
+      FILE_WRITE: 'Write File',
+      FILE_DELETE: 'Delete File',
+      LIST_DIR: 'List Directory',
+      CREATE_FILE: 'Create File',
+      RUN_COMMAND: 'Run Command',
+      COMMAND_EXECUTE: 'Run Command',
+      NETWORK_REQUEST: 'Network Request',
+    };
+    return typeMap[type] || type;
+  }
+
+  function dismissProposedActions() {
+    setProposedActions([]);
   }
 
   return (
@@ -254,6 +296,50 @@ export default function Chat() {
             {error && (
               <div className="chat-error">
                 {error}
+              </div>
+            )}
+
+            {/* ClawdBot status indicator */}
+            {clawdbotAvailable === false && (
+              <div className="chat-status-banner offline">
+                ClawdBot is not available. Messages are saved locally.
+              </div>
+            )}
+
+            {/* Proposed actions banner */}
+            {proposedActions.length > 0 && (
+              <div className="chat-proposed-actions">
+                <div className="proposed-actions-header">
+                  <span className="proposed-actions-title">
+                    {proposedActions.length} action{proposedActions.length > 1 ? 's' : ''} awaiting your approval
+                  </span>
+                  <button
+                    className="btn btn-link btn-small"
+                    onClick={dismissProposedActions}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <div className="proposed-actions-list">
+                  {proposedActions.slice(0, 3).map(action => (
+                    <div key={action.id} className={`proposed-action-item risk-${action.risk_level.toLowerCase()}`}>
+                      <span className={`risk-dot risk-${action.risk_level.toLowerCase()}`}></span>
+                      <span className="proposed-action-type">{formatActionType(action.action_type)}</span>
+                      <span className="proposed-action-summary">{action.summary}</span>
+                    </div>
+                  ))}
+                  {proposedActions.length > 3 && (
+                    <div className="proposed-actions-more">
+                      +{proposedActions.length - 3} more action{proposedActions.length - 3 > 1 ? 's' : ''}
+                    </div>
+                  )}
+                </div>
+                <div className="proposed-actions-footer">
+                  <span className="text-muted">Actions never run without your approval.</span>
+                  <Link to="/approvals" className="btn btn-primary btn-small">
+                    Review Actions
+                  </Link>
+                </div>
               </div>
             )}
 

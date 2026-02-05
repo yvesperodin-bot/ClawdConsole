@@ -1,16 +1,32 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import bcrypt from 'bcrypt';
 import {
   getSetupState,
+  getSecurityProfile,
   createPendingAction,
   getPendingActions,
-  resolveAction,
+  getPendingAction,
+  approveActionWithResult,
+  denyActionWithReason,
   logAudit,
 } from '../database/db.js';
-import { executeApprovedAction } from '../services/clawdbot.js';
-import { validatePath, validateCommand, FRIENDLY_MESSAGES } from '../middleware/workspaceJail.js';
+import { approveClawdBotAction, denyClawdBotAction } from '../services/clawdbot.js';
+import { validatePath, validateCommand } from '../middleware/workspaceJail.js';
 
 const router = Router();
+
+/**
+ * Action Types and their security requirements:
+ * - FILE_READ, FILE_WRITE, FILE_DELETE, LIST_DIR, CREATE_FILE: Workspace jail enforced
+ * - RUN_COMMAND: Requires POWER_USER profile + PIN verification
+ * - NETWORK_REQUEST: Requires CONNECTED profile + allowlist
+ */
+
+// Action types that require special handling
+const FILE_ACTION_TYPES = ['FILE_READ', 'FILE_WRITE', 'FILE_DELETE', 'LIST_DIR', 'CREATE_FILE'];
+const COMMAND_ACTION_TYPES = ['RUN_COMMAND', 'COMMAND_EXECUTE'];
+const NETWORK_ACTION_TYPES = ['NETWORK_REQUEST'];
 
 // Middleware to check setup completion
 router.use((req: Request, res: Response, next) => {
@@ -50,7 +66,7 @@ router.get('/pending', (req: Request, res: Response) => {
  * Propose a new action (from ClawdBot or internal)
  */
 router.post('/propose', (req: Request, res: Response) => {
-  const { action_type, target, summary, risk_level, preview, conversation_id } = req.body;
+  const { action_type, target, summary, risk_level, preview, conversation_id, clawd_action_id } = req.body;
 
   // Validate required fields
   if (!action_type || !target || !summary) {
@@ -71,9 +87,10 @@ router.post('/propose', (req: Request, res: Response) => {
   }
 
   // Validate target based on action type
-  if (action_type === 'FILE_READ' || action_type === 'FILE_WRITE' || action_type === 'FILE_DELETE') {
+  if (FILE_ACTION_TYPES.includes(action_type)) {
     const pathCheck = validatePath(target);
     if (!pathCheck.allowed) {
+      logAudit('SECURITY', 'ACTION_BLOCKED', `Proposed action blocked: ${pathCheck.reason}`, { action_type, target }, 'HIGH');
       return res.status(403).json({
         error: 'Path not allowed',
         message: pathCheck.reason,
@@ -81,9 +98,10 @@ router.post('/propose', (req: Request, res: Response) => {
     }
   }
 
-  if (action_type === 'COMMAND_EXECUTE') {
+  if (COMMAND_ACTION_TYPES.includes(action_type)) {
     const commandCheck = validateCommand(target);
     if (!commandCheck.allowed) {
+      logAudit('SECURITY', 'ACTION_BLOCKED', `Proposed command blocked: ${commandCheck.reason}`, { action_type, target }, 'HIGH');
       return res.status(403).json({
         error: 'Command not allowed',
         message: commandCheck.reason,
@@ -100,7 +118,8 @@ router.post('/propose', (req: Request, res: Response) => {
     summary,
     riskLevelValue as 'LOW' | 'MEDIUM' | 'HIGH',
     preview || null,
-    conversation_id || null
+    conversation_id || null,
+    clawd_action_id || null
   );
 
   res.status(201).json({
@@ -121,26 +140,37 @@ router.post('/propose', (req: Request, res: Response) => {
 /**
  * POST /api/actions/:id/approve
  * Approve a pending action
+ *
+ * Security checks:
+ * 1. Verify action exists and is PENDING
+ * 2. Validate workspace jail for file operations
+ * 3. Check profile permissions for command/network operations
+ * 4. Require PIN for RUN_COMMAND actions
+ * 5. Forward approval to ClawdBot
+ * 6. Store result and update status
  */
 router.post('/:id/approve', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const { admin_pin } = req.body;
 
-  // Get pending actions to find this one
-  const pendingActions = getPendingActions();
-  const action = pendingActions.find(a => a.id === id);
-
-  if (!action) {
+  // Get the action
+  const action = getPendingAction(id);
+  if (!action || action.status !== 'PENDING') {
     return res.status(404).json({
       error: 'Not found',
       message: 'This action is no longer pending or does not exist.',
     });
   }
 
-  // Perform final security checks
-  if (action.action_type.startsWith('FILE_')) {
+  const state = getSetupState()!;
+  const profile = getSecurityProfile(state.security_profile);
+
+  // Security Check 1: Validate file paths against workspace jail
+  if (FILE_ACTION_TYPES.includes(action.action_type)) {
     const pathCheck = validatePath(action.target);
     if (!pathCheck.allowed) {
-      resolveAction(id, false);
+      denyActionWithReason(id, `Security: ${pathCheck.reason}`);
+      logAudit('SECURITY', 'APPROVAL_BLOCKED', `Action blocked by workspace jail: ${action.summary}`, { id, reason: pathCheck.reason }, 'HIGH');
       return res.status(403).json({
         error: 'Action blocked',
         message: `This action was blocked for your safety: ${pathCheck.reason}`,
@@ -148,36 +178,112 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     }
   }
 
-  // Resolve the action as approved
-  const resolved = resolveAction(id, true);
+  // Security Check 2: RUN_COMMAND requires POWER_USER profile + PIN
+  if (COMMAND_ACTION_TYPES.includes(action.action_type)) {
+    // Must be POWER_USER
+    if (!profile || !profile.allow_system_access) {
+      denyActionWithReason(id, 'Security: Command execution not allowed in current profile');
+      logAudit('SECURITY', 'APPROVAL_BLOCKED', `Command execution blocked: profile ${state.security_profile} does not allow system access`, { id }, 'HIGH');
+      return res.status(403).json({
+        error: 'Profile restriction',
+        message: 'Command execution is only allowed in Power User mode. Please change your security profile in Settings.',
+      });
+    }
 
-  // Execute the action via ClawdBot
-  const result = await executeApprovedAction(id);
+    // Must verify PIN if set
+    if (state.admin_pin_hash) {
+      if (!admin_pin) {
+        return res.status(403).json({
+          error: 'PIN required',
+          message: 'Your admin PIN is required to approve command execution.',
+          requires_pin: true,
+        });
+      }
 
-  if (!result.success) {
-    logAudit('ACTION', 'EXECUTION_FAILED', `Failed to execute action: ${action.summary}`, { id, error: result.error }, 'MEDIUM');
-    return res.status(502).json({
-      error: 'Execution failed',
-      message: result.error || 'The action could not be completed. Please try again.',
+      const pinValid = await bcrypt.compare(admin_pin, state.admin_pin_hash);
+      if (!pinValid) {
+        logAudit('SECURITY', 'INVALID_PIN', 'Invalid PIN for command approval', { id }, 'HIGH');
+        return res.status(403).json({
+          error: 'Invalid PIN',
+          message: 'The admin PIN you entered is incorrect.',
+        });
+      }
+    }
+
+    // Validate command safety
+    const commandCheck = validateCommand(action.target);
+    if (!commandCheck.allowed) {
+      denyActionWithReason(id, `Security: ${commandCheck.reason}`);
+      logAudit('SECURITY', 'APPROVAL_BLOCKED', `Command blocked: ${commandCheck.reason}`, { id }, 'HIGH');
+      return res.status(403).json({
+        error: 'Command blocked',
+        message: commandCheck.reason,
+      });
+    }
+  }
+
+  // Security Check 3: NETWORK_REQUEST requires CONNECTED profile
+  if (NETWORK_ACTION_TYPES.includes(action.action_type)) {
+    if (!profile || !profile.allow_network) {
+      denyActionWithReason(id, 'Security: Network access not allowed in current profile');
+      logAudit('SECURITY', 'APPROVAL_BLOCKED', `Network request blocked: profile ${state.security_profile} does not allow network access`, { id }, 'HIGH');
+      return res.status(403).json({
+        error: 'Profile restriction',
+        message: 'Network requests are not allowed in your current security profile.',
+      });
+    }
+  }
+
+  // Forward approval to ClawdBot
+  if (action.clawd_action_id && action.conversation_id) {
+    const clawdResult = await approveClawdBotAction(action.conversation_id, action.clawd_action_id);
+
+    if (!clawdResult.success) {
+      logAudit('ACTION', 'EXECUTION_FAILED', `ClawdBot execution failed: ${action.summary}`, { id, error: clawdResult.error }, 'MEDIUM');
+      return res.status(502).json({
+        error: 'Execution failed',
+        message: clawdResult.error || 'ClawdBot could not execute the action. Please try again.',
+      });
+    }
+
+    // Store result and mark as approved
+    const resultSummary = clawdResult.resultSummary || 'Action completed successfully';
+    const resolved = approveActionWithResult(id, resultSummary);
+
+    logAudit('ACTION', 'EXECUTED', `Action executed: ${action.summary}`, { id, resultSummary, updatedFiles: clawdResult.updatedFiles }, 'INFO');
+
+    return res.json({
+      success: true,
+      message: 'Action approved and executed.',
       action: {
         id: resolved.id,
+        action_type: resolved.action_type,
+        target: resolved.target,
         status: resolved.status,
+        result_summary: resolved.result_summary,
         resolved_at: resolved.resolved_at,
+      },
+      result: {
+        summary: resultSummary,
+        updated_files: clawdResult.updatedFiles,
       },
     });
   }
 
+  // No ClawdBot action ID - just mark as approved (manual action)
+  const resolved = approveActionWithResult(id, 'Approved by user');
+
   res.json({
     success: true,
-    message: 'Action approved and executed.',
+    message: 'Action approved.',
     action: {
       id: resolved.id,
       action_type: resolved.action_type,
       target: resolved.target,
       status: resolved.status,
+      result_summary: resolved.result_summary,
       resolved_at: resolved.resolved_at,
     },
-    result: result.data,
   });
 });
 
@@ -185,28 +291,26 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
  * POST /api/actions/:id/deny
  * Deny a pending action
  */
-router.post('/:id/deny', (req: Request, res: Response) => {
+router.post('/:id/deny', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { reason } = req.body;
 
-  // Get pending actions to find this one
-  const pendingActions = getPendingActions();
-  const action = pendingActions.find(a => a.id === id);
-
-  if (!action) {
+  // Get the action
+  const action = getPendingAction(id);
+  if (!action || action.status !== 'PENDING') {
     return res.status(404).json({
       error: 'Not found',
       message: 'This action is no longer pending or does not exist.',
     });
   }
 
-  // Resolve the action as denied
-  const resolved = resolveAction(id, false);
-
-  // Log the denial reason if provided
-  if (reason) {
-    logAudit('ACTION', 'DENIAL_REASON', `Action denied with reason: ${reason}`, { id, reason }, 'INFO');
+  // Forward denial to ClawdBot (best effort)
+  if (action.clawd_action_id && action.conversation_id) {
+    await denyClawdBotAction(action.conversation_id, action.clawd_action_id, reason);
   }
+
+  // Mark as denied with reason
+  const resolved = denyActionWithReason(id, reason || null);
 
   res.json({
     success: true,
@@ -216,6 +320,7 @@ router.post('/:id/deny', (req: Request, res: Response) => {
       action_type: resolved.action_type,
       target: resolved.target,
       status: resolved.status,
+      deny_reason: resolved.deny_reason,
       resolved_at: resolved.resolved_at,
     },
   });
@@ -245,6 +350,8 @@ router.get('/history', (req: Request, res: Response) => {
       summary: a.summary,
       risk_level: a.risk_level,
       status: a.status,
+      result_summary: a.result_summary,
+      deny_reason: a.deny_reason,
       created_at: a.created_at,
       resolved_at: a.resolved_at,
     })),

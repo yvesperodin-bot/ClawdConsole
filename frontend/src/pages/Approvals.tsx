@@ -23,6 +23,8 @@ interface HistoryAction {
   summary: string;
   risk_level: string;
   status: string;
+  result_summary: string | null;
+  deny_reason: string | null;
   created_at: string;
   resolved_at: string;
 }
@@ -34,6 +36,10 @@ export default function Approvals() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedAction, setSelectedAction] = useState<PendingAction | null>(null);
+  const [pinDialogAction, setPinDialogAction] = useState<PendingAction | null>(null);
+  const [pinValue, setPinValue] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<{ summary: string; updatedFiles?: string[] } | null>(null);
 
   useEffect(() => {
     loadPendingActions();
@@ -57,19 +63,72 @@ export default function Approvals() {
     }
   }
 
-  async function approveAction(id: string) {
+  async function approveAction(id: string, adminPin?: string) {
     setProcessing(id);
-    const result = await apiPost<{ success: boolean; error?: string }>(
+    setPinError(null);
+
+    const result = await apiPost<{
+      success: boolean;
+      requires_pin?: boolean;
+      error?: string;
+      message?: string;
+      result?: { summary: string; updated_files?: string[] };
+    }>(
       `/api/actions/${id}/approve`,
-      {}
+      adminPin ? { admin_pin: adminPin } : {}
     );
-    if (result.data?.success || result.error) {
-      // Reload to get updated list
-      await loadPendingActions();
-      if (showHistory) await loadHistory();
+
+    // Check if PIN is required
+    if (result.data?.requires_pin) {
+      const action = pendingActions.find(a => a.id === id);
+      if (action) {
+        setPinDialogAction(action);
+        setPinValue('');
+      }
+      setProcessing(null);
+      return;
     }
+
+    // Check for PIN error
+    if (result.error?.includes('PIN') || result.error?.includes('Invalid')) {
+      setPinError(result.error);
+      setProcessing(null);
+      return;
+    }
+
+    // Success - show result if available
+    if (result.data?.success && result.data?.result) {
+      setLastResult({
+        summary: result.data.result.summary,
+        updatedFiles: result.data.result.updated_files,
+      });
+    }
+
+    // Close PIN dialog if open
+    setPinDialogAction(null);
+    setPinValue('');
+
+    // Reload to get updated list
+    await loadPendingActions();
+    if (showHistory) await loadHistory();
+
     setProcessing(null);
     setSelectedAction(null);
+  }
+
+  async function handlePinSubmit() {
+    if (!pinDialogAction || !pinValue.trim()) return;
+    await approveAction(pinDialogAction.id, pinValue.trim());
+  }
+
+  function closePinDialog() {
+    setPinDialogAction(null);
+    setPinValue('');
+    setPinError(null);
+  }
+
+  function dismissResult() {
+    setLastResult(null);
   }
 
   async function denyAction(id: string) {
@@ -133,6 +192,64 @@ export default function Approvals() {
 
   return (
     <div>
+      {/* PIN Dialog */}
+      {pinDialogAction && (
+        <div className="dialog-overlay">
+          <div className="dialog">
+            <h3>Admin PIN Required</h3>
+            <p>
+              Command execution requires your admin PIN for security.
+            </p>
+            <div className="dialog-action-summary">
+              <strong>{formatActionType(pinDialogAction.action_type)}:</strong>{' '}
+              {pinDialogAction.summary}
+            </div>
+            <div className="form-group">
+              <label htmlFor="admin-pin">Admin PIN</label>
+              <input
+                type="password"
+                id="admin-pin"
+                value={pinValue}
+                onChange={e => setPinValue(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handlePinSubmit()}
+                placeholder="Enter your admin PIN"
+                autoFocus
+              />
+              {pinError && <div className="error-message">{pinError}</div>}
+            </div>
+            <div className="dialog-buttons">
+              <button className="btn btn-secondary" onClick={closePinDialog}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-success"
+                onClick={handlePinSubmit}
+                disabled={!pinValue.trim() || processing === pinDialogAction.id}
+              >
+                {processing === pinDialogAction.id ? 'Verifying...' : 'Approve with PIN'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Result notification */}
+      {lastResult && (
+        <div className="result-notification">
+          <div className="result-content">
+            <strong>Action completed:</strong> {lastResult.summary}
+            {lastResult.updatedFiles && lastResult.updatedFiles.length > 0 && (
+              <div className="result-files">
+                Updated files: {lastResult.updatedFiles.join(', ')}
+              </div>
+            )}
+          </div>
+          <button className="btn btn-link btn-small" onClick={dismissResult}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="page-header-row">
         <h1 className="page-title">Approvals</h1>
         <button
@@ -233,6 +350,7 @@ export default function Approvals() {
                   <th>Status</th>
                   <th>Type</th>
                   <th>Summary</th>
+                  <th>Result</th>
                   <th>Risk</th>
                   <th>When</th>
                 </tr>
@@ -247,6 +365,25 @@ export default function Approvals() {
                     </td>
                     <td>{formatActionType(action.action_type)}</td>
                     <td className="summary-cell">{action.summary}</td>
+                    <td className="result-cell">
+                      {action.status === 'APPROVED' && action.result_summary && (
+                        <span className="result-summary" title={action.result_summary}>
+                          {action.result_summary.length > 30
+                            ? action.result_summary.substring(0, 30) + '...'
+                            : action.result_summary}
+                        </span>
+                      )}
+                      {action.status === 'DENIED' && action.deny_reason && (
+                        <span className="deny-reason" title={action.deny_reason}>
+                          {action.deny_reason.length > 30
+                            ? action.deny_reason.substring(0, 30) + '...'
+                            : action.deny_reason}
+                        </span>
+                      )}
+                      {!action.result_summary && !action.deny_reason && (
+                        <span className="text-muted">-</span>
+                      )}
+                    </td>
                     <td>
                       <span className={`risk-indicator-small risk-${action.risk_level.toLowerCase()}`}>
                         {action.risk_level}

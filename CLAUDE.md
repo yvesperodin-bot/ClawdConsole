@@ -387,8 +387,83 @@ npm run dev
 - TypeScript compiles without errors
 - All APIs use relative /api/* paths
 
-### Checkpoint F: Mock Mode
-*Pending*
+### Checkpoint F: ClawdBot Integration + Action Persistence ✓
+**What changed:**
+
+**F1 - ClawdBot Client Rewrite:**
+- Complete rewrite of `clawdbot.ts` with strict API contract
+- Endpoints: GET /health, POST /chat, POST /actions/approve, POST /actions/deny
+- Proper timeouts: 1000ms health, 5000ms chat, 10000ms action execution
+- Type definitions: `ProposedAction`, `ClawdBotChatResponse`, `ClawdBotActionResult`
+- Friendly error messages for common connection issues
+
+**F2 - Chat Route Integration:**
+- Messages forwarded to ClawdBot when reachable
+- Graceful offline mode with calm system messages
+- proposedActions from ClawdBot persisted to pending_actions table
+- Path validation for file operations before persisting
+
+**F3 - Database Schema Updates:**
+- Added `clawd_action_id` to link Console actions to ClawdBot actions
+- Added `result_summary` to store execution results
+- Added `deny_reason` to store denial reasons
+- New functions: `getPendingAction()`, `approveActionWithResult()`, `denyActionWithReason()`
+
+**F4 - Frontend Integration:**
+- Chat.tsx shows proposed actions banner when actions pending
+- Link to Approvals page from chat
+- ClawdBot availability status indicator
+- Approvals.tsx shows PIN dialog for command actions
+- Approvals history shows result_summary and deny_reason
+- Result notification after successful action execution
+
+**F5 - Security Checks (Non-negotiable):**
+- FILE_* actions: Workspace jail validation
+- RUN_COMMAND: Requires POWER_USER profile + PIN verification
+- NETWORK_REQUEST: Requires CONNECTED profile
+- All security violations logged to audit trail
+- Actions auto-denied if security checks fail
+
+**Files updated:**
+- `backend/src/services/clawdbot.ts` (complete rewrite)
+- `backend/src/database/schema.sql` (added 3 new fields)
+- `backend/src/database/db.ts` (added 3 new functions)
+- `backend/src/routes/chat.ts` (ClawdBot integration)
+- `backend/src/routes/actions.ts` (security-gated approval)
+- `frontend/src/pages/Chat.tsx` (proposed actions banner)
+- `frontend/src/pages/Approvals.tsx` (PIN dialog, results display)
+- `frontend/src/index.css` (new component styles)
+
+**API Contract with ClawdBot (localhost:7331):**
+```
+GET  /health                -> { ok, version? }
+POST /chat                  -> { conversationId, response, proposedActions?[] }
+POST /actions/approve       -> { ok, resultSummary, updatedFiles? }
+POST /actions/deny          -> { ok }
+```
+
+**Security Flow:**
+1. ClawdBot proposes action via chat response
+2. Console persists to pending_actions with clawd_action_id
+3. User reviews in Approvals page
+4. On approve: security checks → profile validation → PIN if command → forward to ClawdBot
+5. On deny: reason stored → best-effort forward to ClawdBot
+6. All steps logged to audit trail
+
+**How to run:**
+```bash
+npm run dev
+# Chat with ClawdBot, review proposed actions in Approvals
+# Without ClawdBot: offline mode with calm messaging
+```
+
+**Verified working:**
+- ClawdBot integration with strict API contract
+- proposedActions persisted from chat responses
+- Security-gated action approval (workspace jail, profiles, PIN)
+- Frontend shows proposed actions and results
+- TypeScript compiles without errors
+- All security checks enforced
 
 ### Checkpoint G: Final Cleanup
 *Pending*
@@ -405,6 +480,7 @@ npm run dev
 | 2026-02-04 | Checkpoint C: SQLite wiring + API integration | AI Assistant |
 | 2026-02-04 | Checkpoint D: First-Run Setup Wizard | AI Assistant |
 | 2026-02-04 | Checkpoint E: Full UI implementation + bcrypt | AI Assistant |
+| 2026-02-05 | Checkpoint F: ClawdBot integration + action persistence | AI Assistant |
 
 ---
 
