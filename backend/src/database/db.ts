@@ -196,12 +196,15 @@ export function getMessages(conversationId: string): Message[] {
 export interface PendingAction {
   id: string;
   conversation_id: string | null;
+  clawd_action_id: string | null;
   action_type: string;
   target: string;
   summary: string;
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
   preview: string | null;
   status: 'PENDING' | 'APPROVED' | 'DENIED' | 'EXPIRED';
+  result_summary: string | null;
+  deny_reason: string | null;
   created_at: string;
   resolved_at: string | null;
 }
@@ -213,21 +216,27 @@ export function createPendingAction(
   summary: string,
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH',
   preview: string | null,
-  conversationId: string | null = null
+  conversationId: string | null = null,
+  clawdActionId: string | null = null
 ): PendingAction {
   const db = getDatabase();
   db.prepare(`
-    INSERT INTO pending_actions (id, conversation_id, action_type, target, summary, risk_level, preview)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, conversationId, actionType, target, summary, riskLevel, preview);
+    INSERT INTO pending_actions (id, conversation_id, clawd_action_id, action_type, target, summary, risk_level, preview)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, conversationId, clawdActionId, actionType, target, summary, riskLevel, preview);
 
-  logAudit('ACTION', 'PROPOSED', summary, { id, actionType, target, riskLevel }, riskLevel);
+  logAudit('ACTION', 'PROPOSED', summary, { id, actionType, target, riskLevel, clawdActionId }, riskLevel);
   return db.prepare('SELECT * FROM pending_actions WHERE id = ?').get(id) as PendingAction;
 }
 
 export function getPendingActions(): PendingAction[] {
   const db = getDatabase();
   return db.prepare('SELECT * FROM pending_actions WHERE status = "PENDING" ORDER BY created_at DESC').all() as PendingAction[];
+}
+
+export function getPendingAction(id: string): PendingAction | null {
+  const db = getDatabase();
+  return db.prepare('SELECT * FROM pending_actions WHERE id = ?').get(id) as PendingAction | null;
 }
 
 export function resolveAction(id: string, approved: boolean): PendingAction {
@@ -242,6 +251,36 @@ export function resolveAction(id: string, approved: boolean): PendingAction {
 
   const action = db.prepare('SELECT * FROM pending_actions WHERE id = ?').get(id) as PendingAction;
   logAudit('ACTION', status, `Action ${status.toLowerCase()}: ${action.summary}`, { id, actionType: action.action_type }, action.risk_level);
+
+  return action;
+}
+
+export function approveActionWithResult(id: string, resultSummary: string): PendingAction {
+  const db = getDatabase();
+
+  db.prepare(`
+    UPDATE pending_actions
+    SET status = 'APPROVED', resolved_at = datetime('now', 'localtime'), result_summary = ?
+    WHERE id = ?
+  `).run(resultSummary, id);
+
+  const action = db.prepare('SELECT * FROM pending_actions WHERE id = ?').get(id) as PendingAction;
+  logAudit('ACTION', 'APPROVED', `Action approved: ${action.summary}`, { id, actionType: action.action_type, resultSummary }, action.risk_level);
+
+  return action;
+}
+
+export function denyActionWithReason(id: string, reason: string | null): PendingAction {
+  const db = getDatabase();
+
+  db.prepare(`
+    UPDATE pending_actions
+    SET status = 'DENIED', resolved_at = datetime('now', 'localtime'), deny_reason = ?
+    WHERE id = ?
+  `).run(reason, id);
+
+  const action = db.prepare('SELECT * FROM pending_actions WHERE id = ?').get(id) as PendingAction;
+  logAudit('ACTION', 'DENIED', `Action denied: ${action.summary}`, { id, actionType: action.action_type, reason }, action.risk_level);
 
   return action;
 }

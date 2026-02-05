@@ -7,9 +7,11 @@ import {
   getConversation,
   addMessage,
   getMessages,
+  createPendingAction,
   logAudit,
 } from '../database/db.js';
-import { sendToClawdBot, checkClawdBotStatus } from '../services/clawdbot.js';
+import { sendToClawdBot, checkClawdBotStatus, CLAWDBOT_MESSAGES } from '../services/clawdbot.js';
+import { validatePath } from '../middleware/workspaceJail.js';
 
 const router = Router();
 
@@ -97,6 +99,13 @@ router.get('/conversations/:id', (req: Request, res: Response) => {
 /**
  * POST /api/chat/conversations/:id/messages
  * Send a message in a conversation
+ *
+ * Flow:
+ * 1. Save user message
+ * 2. If ClawdBot reachable: forward to ClawdBot /chat
+ * 3. Save assistant response
+ * 4. If proposedActions returned: persist to pending_actions table
+ * 5. If ClawdBot unreachable: respond with calm local message
  */
 router.post('/conversations/:id/messages', async (req: Request, res: Response) => {
   const { id: conversationId } = req.params;
@@ -119,39 +128,121 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
     });
   }
 
-  // Check ClawdBot status
-  const clawdbotStatus = await checkClawdBotStatus();
-  if (!clawdbotStatus.connected) {
-    return res.status(503).json({
-      error: 'ClawdBot unavailable',
-      message: 'ClawdBot is not running. Please start ClawdBot to send messages.',
-    });
-  }
-
-  // Save user message
+  // Save user message first (always persisted)
   const userMessageId = crypto.randomUUID();
   const userMessage = addMessage(userMessageId, conversationId, 'user', content.trim());
 
-  // Send to ClawdBot
-  const response = await sendToClawdBot(conversationId, content.trim());
+  // Check ClawdBot status
+  const clawdbotStatus = await checkClawdBotStatus();
 
-  if (!response.success) {
-    return res.status(502).json({
-      error: 'Processing failed',
-      message: response.error || 'Could not process your message. Please try again.',
+  if (!clawdbotStatus.connected) {
+    // ClawdBot not available - respond with calm local message
+    const offlineContent = CLAWDBOT_MESSAGES.OFFLINE_MODE + ' Your message has been saved. When ClawdBot is available, you can continue the conversation.';
+    const offlineMessageId = crypto.randomUUID();
+    const offlineMessage = addMessage(offlineMessageId, conversationId, 'system', offlineContent);
+
+    logAudit('CHAT', 'OFFLINE_MODE', 'Message saved while ClawdBot unavailable', { conversationId }, 'INFO');
+
+    return res.json({
       user_message: {
         id: userMessage.id,
         role: userMessage.role,
         content: userMessage.content,
         created_at: userMessage.created_at,
       },
+      assistant_message: {
+        id: offlineMessage.id,
+        role: offlineMessage.role,
+        content: offlineMessage.content,
+        created_at: offlineMessage.created_at,
+      },
+      clawdbot_available: false,
+      proposed_actions: [],
+    });
+  }
+
+  // Send to ClawdBot
+  const response = await sendToClawdBot(conversationId, content.trim());
+
+  if (!response.success) {
+    // ClawdBot error - still save an error message
+    const errorContent = response.error || 'Could not process your message. Please try again.';
+    const errorMessageId = crypto.randomUUID();
+    const errorMessage = addMessage(errorMessageId, conversationId, 'system', errorContent);
+
+    return res.json({
+      user_message: {
+        id: userMessage.id,
+        role: userMessage.role,
+        content: userMessage.content,
+        created_at: userMessage.created_at,
+      },
+      assistant_message: {
+        id: errorMessage.id,
+        role: errorMessage.role,
+        content: errorMessage.content,
+        created_at: errorMessage.created_at,
+      },
+      clawdbot_available: false,
+      proposed_actions: [],
     });
   }
 
   // Save assistant response
-  const assistantContent = response.data?.message || response.data?.content || 'I received your message but could not generate a response.';
+  const assistantContent = response.response || 'I received your message.';
   const assistantMessageId = crypto.randomUUID();
   const assistantMessage = addMessage(assistantMessageId, conversationId, 'assistant', assistantContent);
+
+  // Process proposed actions
+  const proposedActions: Array<{
+    id: string;
+    action_type: string;
+    target: string;
+    summary: string;
+    risk_level: string;
+    preview: string | null;
+  }> = [];
+
+  if (response.proposedActions && response.proposedActions.length > 0) {
+    for (const action of response.proposedActions) {
+      // Validate file paths for file operations
+      if (action.type.startsWith('FILE_') || action.type.includes('FILE')) {
+        const pathCheck = validatePath(action.target);
+        if (!pathCheck.allowed) {
+          logAudit('SECURITY', 'ACTION_PATH_BLOCKED', `Proposed action blocked: ${pathCheck.reason}`, { actionType: action.type, target: action.target }, 'HIGH');
+          continue; // Skip this action - don't persist it
+        }
+      }
+
+      // Create a local ID for this action
+      const localId = crypto.randomUUID();
+
+      // Persist to pending_actions table
+      const pendingAction = createPendingAction(
+        localId,
+        action.type,
+        action.target,
+        action.summary,
+        action.riskLevel,
+        action.preview || null,
+        conversationId,
+        action.actionId // ClawdBot's action ID
+      );
+
+      proposedActions.push({
+        id: pendingAction.id,
+        action_type: pendingAction.action_type,
+        target: pendingAction.target,
+        summary: pendingAction.summary,
+        risk_level: pendingAction.risk_level,
+        preview: pendingAction.preview,
+      });
+    }
+
+    if (proposedActions.length > 0) {
+      logAudit('CHAT', 'PROPOSED_ACTIONS', `${proposedActions.length} action(s) proposed and awaiting approval`, { conversationId, count: proposedActions.length }, 'INFO');
+    }
+  }
 
   res.json({
     user_message: {
@@ -166,8 +257,8 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
       content: assistantMessage.content,
       created_at: assistantMessage.created_at,
     },
-    // Include any proposed actions from ClawdBot
-    proposed_actions: response.data?.proposed_actions || [],
+    clawdbot_available: true,
+    proposed_actions: proposedActions,
   });
 });
 

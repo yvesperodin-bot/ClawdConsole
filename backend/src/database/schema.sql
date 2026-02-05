@@ -60,12 +60,15 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS pending_actions (
     id TEXT PRIMARY KEY,
     conversation_id TEXT,
+    clawd_action_id TEXT,
     action_type TEXT NOT NULL,
     target TEXT NOT NULL,
     summary TEXT NOT NULL,
     risk_level TEXT NOT NULL CHECK (risk_level IN ('LOW', 'MEDIUM', 'HIGH')),
     preview TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'DENIED', 'EXPIRED')),
+    result_summary TEXT,
+    deny_reason TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     resolved_at TEXT,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL

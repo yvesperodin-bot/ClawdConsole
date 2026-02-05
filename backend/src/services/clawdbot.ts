@@ -5,11 +5,24 @@ import { logAudit } from '../database/db.js';
  *
  * Handles communication with the local ClawdBot agent running on localhost:7331.
  * This is the ONLY external service allowed in AIR_GAPPED mode since it's local.
+ *
+ * API Contract:
+ * - GET  /health                -> { ok, version? }
+ * - POST /chat                  -> { conversationId, response, proposedActions?[] }
+ * - POST /actions/approve       -> { ok, resultSummary, updatedFiles? }
+ * - POST /actions/deny          -> { ok }
  */
 
 const CLAWDBOT_URL = 'http://127.0.0.1:7331';
-const HEALTH_CHECK_TIMEOUT_MS = 1000; // Fast timeout for status checks
-const REQUEST_TIMEOUT_MS = 5000; // Longer timeout for actual requests
+
+// Timeouts
+const HEALTH_CHECK_TIMEOUT_MS = 1000;   // Fast timeout for status checks
+const CHAT_TIMEOUT_MS = 5000;           // 5s for chat
+const ACTION_TIMEOUT_MS = 10000;        // 10s for action execution
+
+// ============================================================================
+// Type Definitions
+// ============================================================================
 
 export interface ClawdBotStatus {
   connected: boolean;
@@ -18,15 +31,46 @@ export interface ClawdBotStatus {
   error?: string;
 }
 
-export interface ClawdBotResponse {
+export interface ProposedAction {
+  actionId: string;
+  type: string;
+  target: string;
+  summary: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  preview?: string;
+}
+
+export interface ClawdBotChatResponse {
   success: boolean;
-  message?: string;
-  data?: any;
+  conversationId?: string;
+  response?: string;
+  proposedActions?: ProposedAction[];
   error?: string;
 }
 
+export interface ClawdBotActionResult {
+  success: boolean;
+  ok?: boolean;
+  resultSummary?: string;
+  updatedFiles?: string[];
+  error?: string;
+}
+
+// Legacy interface for backwards compatibility
+export interface ClawdBotResponse {
+  success: boolean;
+  message?: string;
+  data?: unknown;
+  error?: string;
+}
+
+// ============================================================================
+// Health Check
+// ============================================================================
+
 /**
  * Check if ClawdBot is running and accessible
+ * GET /health -> { ok, version? }
  */
 export async function checkClawdBotStatus(): Promise<ClawdBotStatus> {
   try {
@@ -43,7 +87,7 @@ export async function checkClawdBotStatus(): Promise<ClawdBotStatus> {
     if (response.ok) {
       const data = await response.json().catch(() => ({}));
       return {
-        connected: true,
+        connected: data.ok === true || response.ok,
         version: data.version || 'unknown',
         uptime: data.uptime,
       };
@@ -57,7 +101,7 @@ export async function checkClawdBotStatus(): Promise<ClawdBotStatus> {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     // Don't log every failed health check as it's normal during startup
-    if (!errorMessage.includes('ECONNREFUSED')) {
+    if (!errorMessage.includes('ECONNREFUSED') && !errorMessage.includes('abort')) {
       logAudit('CLAWDBOT', 'CONNECTION_ERROR', `Failed to connect to ClawdBot: ${errorMessage}`, null, 'INFO');
     }
 
@@ -68,16 +112,21 @@ export async function checkClawdBotStatus(): Promise<ClawdBotStatus> {
   }
 }
 
+// ============================================================================
+// Chat
+// ============================================================================
+
 /**
  * Send a message to ClawdBot for processing
+ * POST /chat -> { conversationId?, message } -> { conversationId, response, proposedActions?[] }
  */
 export async function sendToClawdBot(
   conversationId: string,
   message: string
-): Promise<ClawdBotResponse> {
+): Promise<ClawdBotChatResponse> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s for processing
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
 
     const response = await fetch(`${CLAWDBOT_URL}/chat`, {
       method: 'POST',
@@ -85,7 +134,7 @@ export async function sendToClawdBot(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        conversation_id: conversationId,
+        conversationId: conversationId,
         message: message,
       }),
       signal: controller.signal,
@@ -96,18 +145,36 @@ export async function sendToClawdBot(
     if (response.ok) {
       const data = await response.json();
       logAudit('CLAWDBOT', 'MESSAGE_SENT', 'Message sent to ClawdBot', { conversationId }, 'INFO');
+
+      // Normalize proposed actions
+      const proposedActions: ProposedAction[] = [];
+      if (data.proposedActions && Array.isArray(data.proposedActions)) {
+        for (const action of data.proposedActions) {
+          proposedActions.push({
+            actionId: action.actionId || action.id,
+            type: action.type || action.action_type,
+            target: action.target,
+            summary: action.summary || action.description,
+            riskLevel: normalizeRiskLevel(action.riskLevel || action.risk_level),
+            preview: action.preview,
+          });
+        }
+      }
+
       return {
         success: true,
-        data: data,
+        conversationId: data.conversationId || conversationId,
+        response: data.response || data.message || data.content,
+        proposedActions: proposedActions.length > 0 ? proposedActions : undefined,
       };
     }
 
     const errorText = await response.text().catch(() => 'Unknown error');
-    logAudit('CLAWDBOT', 'REQUEST_FAILED', `ClawdBot request failed: ${errorText}`, { conversationId, status: response.status }, 'MEDIUM');
+    logAudit('CLAWDBOT', 'REQUEST_FAILED', `ClawdBot chat request failed: ${errorText}`, { conversationId, status: response.status }, 'MEDIUM');
 
     return {
       success: false,
-      error: `ClawdBot could not process your request. Please try again.`,
+      error: `ClawdBot could not process your request (status ${response.status}).`,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -120,27 +187,30 @@ export async function sendToClawdBot(
   }
 }
 
+// ============================================================================
+// Action Approval
+// ============================================================================
+
 /**
- * Request an action from ClawdBot (returns a pending action for approval)
+ * Forward approval to ClawdBot
+ * POST /actions/approve -> { conversationId, actionId } -> { ok, resultSummary, updatedFiles? }
  */
-export async function requestAction(
-  actionType: string,
-  target: string,
-  parameters: Record<string, any>
-): Promise<ClawdBotResponse> {
+export async function approveClawdBotAction(
+  conversationId: string,
+  clawdActionId: string
+): Promise<ClawdBotActionResult> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), ACTION_TIMEOUT_MS);
 
-    const response = await fetch(`${CLAWDBOT_URL}/action/request`, {
+    const response = await fetch(`${CLAWDBOT_URL}/actions/approve`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        action_type: actionType,
-        target: target,
-        parameters: parameters,
+        conversationId: conversationId,
+        actionId: clawdActionId,
       }),
       signal: controller.signal,
     });
@@ -149,18 +219,27 @@ export async function requestAction(
 
     if (response.ok) {
       const data = await response.json();
+      logAudit('CLAWDBOT', 'ACTION_APPROVED', `Action ${clawdActionId} approved and forwarded`, { conversationId, clawdActionId }, 'INFO');
+
       return {
         success: true,
-        data: data,
+        ok: data.ok,
+        resultSummary: data.resultSummary || data.result_summary || 'Action completed',
+        updatedFiles: data.updatedFiles || data.updated_files,
       };
     }
 
+    const errorText = await response.text().catch(() => 'Unknown error');
+    logAudit('CLAWDBOT', 'ACTION_APPROVAL_FAILED', `ClawdBot action approval failed: ${errorText}`, { conversationId, clawdActionId, status: response.status }, 'MEDIUM');
+
     return {
       success: false,
-      error: 'Could not request action from ClawdBot.',
+      error: `ClawdBot could not execute the action (status ${response.status}).`,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logAudit('CLAWDBOT', 'ACTION_EXECUTION_FAILED', `Failed to forward approval to ClawdBot: ${errorMessage}`, { conversationId, clawdActionId }, 'HIGH');
+
     return {
       success: false,
       error: getClawdBotFriendlyError(errorMessage),
@@ -169,20 +248,27 @@ export async function requestAction(
 }
 
 /**
- * Execute an approved action
+ * Forward denial to ClawdBot (best effort)
+ * POST /actions/deny -> { conversationId, actionId, reason? } -> { ok }
  */
-export async function executeApprovedAction(actionId: string): Promise<ClawdBotResponse> {
+export async function denyClawdBotAction(
+  conversationId: string,
+  clawdActionId: string,
+  reason?: string
+): Promise<ClawdBotActionResult> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s for execution
+    const timeoutId = setTimeout(() => controller.abort(), ACTION_TIMEOUT_MS);
 
-    const response = await fetch(`${CLAWDBOT_URL}/action/execute`, {
+    const response = await fetch(`${CLAWDBOT_URL}/actions/deny`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        action_id: actionId,
+        conversationId: conversationId,
+        actionId: clawdActionId,
+        reason: reason,
       }),
       signal: controller.signal,
     });
@@ -191,25 +277,47 @@ export async function executeApprovedAction(actionId: string): Promise<ClawdBotR
 
     if (response.ok) {
       const data = await response.json();
-      logAudit('CLAWDBOT', 'ACTION_EXECUTED', `Action ${actionId} executed`, { actionId, result: data }, 'INFO');
+      logAudit('CLAWDBOT', 'ACTION_DENIED', `Action ${clawdActionId} denied and forwarded`, { conversationId, clawdActionId, reason }, 'INFO');
+
       return {
         success: true,
-        data: data,
+        ok: data.ok,
       };
     }
 
+    // Denial forwarding is best effort - log but don't fail
+    logAudit('CLAWDBOT', 'ACTION_DENY_FORWARD_FAILED', `ClawdBot deny forward failed (best effort)`, { conversationId, clawdActionId, status: response.status }, 'INFO');
+
     return {
-      success: false,
-      error: 'Could not execute the action. Please try again.',
+      success: true, // Still mark as success since local denial is what matters
+      ok: true,
     };
   } catch (error) {
+    // Denial forwarding is best effort - log but don't fail
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logAudit('CLAWDBOT', 'EXECUTION_FAILED', `Action execution failed: ${errorMessage}`, { actionId }, 'HIGH');
+    logAudit('CLAWDBOT', 'ACTION_DENY_FORWARD_FAILED', `Failed to forward denial to ClawdBot (best effort): ${errorMessage}`, { conversationId, clawdActionId }, 'INFO');
+
     return {
-      success: false,
-      error: getClawdBotFriendlyError(errorMessage),
+      success: true, // Still mark as success since local denial is what matters
+      ok: true,
     };
   }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Normalize risk level to our enum
+ */
+function normalizeRiskLevel(level: string | undefined): 'LOW' | 'MEDIUM' | 'HIGH' {
+  if (!level) return 'MEDIUM';
+  const normalized = level.toUpperCase();
+  if (normalized === 'LOW' || normalized === 'MEDIUM' || normalized === 'HIGH') {
+    return normalized;
+  }
+  return 'MEDIUM';
 }
 
 /**
@@ -236,4 +344,5 @@ export const CLAWDBOT_MESSAGES = {
   NOT_RUNNING: 'ClawdBot is not running. Start it to enable AI assistance.',
   STARTING: 'Connecting to ClawdBot...',
   ERROR: 'There was a problem connecting to ClawdBot.',
+  OFFLINE_MODE: 'ClawdBot is not available. Working in offline mode.',
 };
