@@ -9,6 +9,7 @@ import pygame
 import sys
 import math
 import random
+import numpy as np
 
 # --- Constants ---
 SCREEN_W, SCREEN_H = 800, 600
@@ -651,6 +652,206 @@ def draw_player(surf, px, py, color=ORANGE):
     pygame.draw.rect(surf, color, (px - PLAYER_SIZE//2, py - PLAYER_SIZE//2, PLAYER_SIZE, PLAYER_SIZE))
 
 
+# --- Music Manager ---
+
+class MusicManager:
+    """Synthesized chiptune background music using square and sawtooth waves.
+
+    All audio is generated programmatically from numpy arrays to mimic the
+    primitive square/sawtooth tones of the Atari TIA sound chip.
+    Channel 0 is reserved exclusively for background music; SFX auto-select
+    from channels 1-15 so they never interrupt each other.
+    """
+
+    SAMPLE_RATE = 44100
+    ONE_SHOT_TRACKS = {'victory', 'death'}
+
+    CASTLE_ROOMS = {
+        'golden_castle', 'golden_foyer',
+        'white_castle',  'white_foyer',
+        'black_castle',  'black_foyer',
+    }
+
+    _NOTE_SEMI = {
+        'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3,
+        'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8,
+        'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11,
+    }
+
+    def __init__(self):
+        pygame.mixer.set_num_channels(16)
+        pygame.mixer.set_reserved(1)          # channel 0 = music only
+        self.channel = pygame.mixer.Channel(0)
+        self.muted = False
+        self.current_track = None
+        self.tracks = {}
+        self._build_tracks()
+
+    # ── waveform primitives ─────────────────────────────────────────────────
+
+    def _freq(self, note):
+        """Parse a note string ('A3', 'C#4', 'Bb2', 'R') → frequency in Hz."""
+        if note == 'R':
+            return 0.0
+        if len(note) > 1 and note[1] in '#b':
+            name, octave = note[:2], int(note[2:])
+        else:
+            name, octave = note[0], int(note[1:])
+        midi = (octave + 1) * 12 + self._NOTE_SEMI[name]
+        return 440.0 * 2.0 ** ((midi - 69) / 12.0)
+
+    def _square(self, freq, dur, vol=0.25, duty=0.5):
+        """Return stereo int16 array of a square wave at *freq* Hz."""
+        n = int(self.SAMPLE_RATE * dur)
+        if n == 0:
+            return np.zeros((1, 2), dtype=np.int16)
+        if freq == 0:
+            return np.zeros((n, 2), dtype=np.int16)
+        period = self.SAMPLE_RATE / freq
+        phase = (np.arange(n) % period) / period
+        wave = np.where(phase < duty, vol, -vol).astype(np.float32)
+        # Tiny per-note fade-in/out to eliminate inter-note clicks
+        fade = min(int(0.004 * self.SAMPLE_RATE), n // 4)
+        if fade > 0:
+            wave[:fade]  *= np.linspace(0.0, 1.0, fade, dtype=np.float32)
+            wave[-fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
+        s = (wave * 32767).clip(-32767, 32767).astype(np.int16)
+        return np.ascontiguousarray(np.column_stack([s, s]))
+
+    def _sawtooth(self, freq, dur, vol=0.20):
+        """Return stereo int16 array of a sawtooth wave at *freq* Hz."""
+        n = int(self.SAMPLE_RATE * dur)
+        if n == 0:
+            return np.zeros((1, 2), dtype=np.int16)
+        if freq == 0:
+            return np.zeros((n, 2), dtype=np.int16)
+        period = self.SAMPLE_RATE / freq
+        phase = (np.arange(n) % period) / period
+        wave = ((2.0 * phase - 1.0) * vol).astype(np.float32)
+        fade = min(int(0.004 * self.SAMPLE_RATE), n // 4)
+        if fade > 0:
+            wave[:fade]  *= np.linspace(0.0, 1.0, fade, dtype=np.float32)
+            wave[-fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
+        s = (wave * 32767).clip(-32767, 32767).astype(np.int16)
+        return np.ascontiguousarray(np.column_stack([s, s]))
+
+    def _melody(self, notes_beats, bpm, wave='square', vol=0.25):
+        """Concatenate (note, beats) pairs into a single stereo PCM array."""
+        beat = 60.0 / bpm
+        parts = []
+        for note, beats in notes_beats:
+            dur_samps = max(2, int(self.SAMPLE_RATE * beat * beats))
+            note_samps = max(1, int(dur_samps * 0.82))
+            gap_samps  = max(1, dur_samps - note_samps)
+            freq = self._freq(note)
+            if wave == 'square':
+                chunk = self._square(freq, note_samps / self.SAMPLE_RATE, vol)
+            else:
+                chunk = self._sawtooth(freq, note_samps / self.SAMPLE_RATE, vol)
+            parts += [chunk, np.zeros((gap_samps, 2), dtype=np.int16)]
+        return np.ascontiguousarray(np.concatenate(parts))
+
+    def _to_sound(self, arr):
+        return pygame.sndarray.make_sound(arr)
+
+    # ── track builders ──────────────────────────────────────────────────────
+
+    def _build_tracks(self):
+        try:
+            self.tracks['overworld'] = self._to_sound(self._mk_overworld())
+            self.tracks['castle']    = self._to_sound(self._mk_castle())
+            self.tracks['dragon']    = self._to_sound(self._mk_dragon())
+            self.tracks['victory']   = self._to_sound(self._mk_victory())
+            self.tracks['death']     = self._to_sound(self._mk_death())
+        except Exception:
+            pass  # graceful degradation if numpy is unavailable
+
+    def _mk_overworld(self):
+        # A-minor feel, 72 BPM — slow, eerie 8-note loop
+        return self._melody([
+            ('A3', 1), ('C4', 1), ('E4', 1), ('G4', 1),
+            ('A4', 1), ('G4', 1), ('E4', 1), ('C4', 1),
+        ], bpm=72, wave='square', vol=0.22)
+
+    def _mk_castle(self):
+        # E-Phrygian, dark and ominous, 65 BPM
+        return self._melody([
+            ('E3', 2), ('F3', 1), ('G3', 1),
+            ('E3', 1), ('D3', 1), ('C3', 1), ('E3', 1),
+        ], bpm=65, wave='square', vol=0.20)
+
+    def _mk_dragon(self):
+        # Urgent 4-note alarm riff, 160 BPM — fast and tense
+        return self._melody([
+            ('C4', 0.5), ('B3', 0.5), ('Bb3', 0.5), ('B3', 0.5),
+        ], bpm=160, wave='square', vol=0.28)
+
+    def _mk_victory(self):
+        # Ascending C-major fanfare, 120 BPM — plays once
+        return self._melody([
+            ('C4', 1), ('E4', 1), ('G4', 1),
+            ('C5', 1), ('E5', 1), ('G5', 1),
+            ('C6', 2),
+        ], bpm=120, wave='square', vol=0.30)
+
+    def _mk_death(self):
+        # Descending chromatic dirge, 60 BPM — plays once
+        return self._melody([
+            ('G3', 2), ('F#3', 2), ('F3', 2),
+            ('E3', 2), ('Eb3', 4),
+        ], bpm=60, wave='square', vol=0.25)
+
+    # ── public API ──────────────────────────────────────────────────────────
+
+    def play(self, track_name, loop=True):
+        if not self.tracks:
+            return
+        if self.current_track == track_name:
+            # One-shot tracks never restart; looping tracks keep playing.
+            if track_name in self.ONE_SHOT_TRACKS or self.channel.get_busy():
+                return
+        self.current_track = track_name
+        if self.muted:
+            return
+        sound = self.tracks.get(track_name)
+        if sound:
+            loops = -1 if loop else 0
+            self.channel.stop()
+            self.channel.play(sound, loops=loops, fade_ms=350)
+
+    def toggle_mute(self):
+        self.muted = not self.muted
+        if self.muted:
+            self.channel.fadeout(300)
+        elif self.current_track and self.current_track not in self.ONE_SHOT_TRACKS:
+            sound = self.tracks.get(self.current_track)
+            if sound:
+                self.channel.play(sound, loops=-1, fade_ms=300)
+
+    def reset(self):
+        """Call when the game resets so one-shot guards are cleared."""
+        self.current_track = None
+        self.channel.stop()
+
+    def update(self, game):
+        """Choose and play the correct track for the current game state."""
+        if game.state == 'won':
+            self.play('victory', loop=False)
+        elif game.state == 'dead':
+            self.play('death', loop=False)
+        else:
+            dragon_here = any(
+                d['alive'] and d['room'] == game.current_room
+                for d in game.dragons
+            )
+            if dragon_here:
+                self.play('dragon', loop=True)
+            elif game.current_room in self.CASTLE_ROOMS:
+                self.play('castle', loop=True)
+            else:
+                self.play('overworld', loop=True)
+
+
 # --- Game State ---
 
 class Game:
@@ -664,8 +865,9 @@ class Game:
         self.font_small = pygame.font.SysFont('monospace', 16)
 
         # Sound setup
-        pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
+        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
         self.sounds = self._init_sounds()
+        self.music  = MusicManager()
 
         self.state = 'playing'  # 'playing', 'dead', 'won'
         self.reset()
@@ -673,7 +875,7 @@ class Game:
     def _init_sounds(self):
         sounds = {}
         try:
-            rate = 22050
+            rate = 44100
             def make_tone(freq, dur, vol=0.3, wave='sine'):
                 frames = int(rate * dur)
                 arr = []
@@ -809,6 +1011,10 @@ class Game:
             'has_item': None,
             'think_timer': 0,
         }
+
+        # Clear music state so one-shot guards don't carry over between games
+        if hasattr(self, 'music'):
+            self.music.reset()
 
     # --- Room helpers ---
     def room(self):
@@ -1222,7 +1428,10 @@ class Game:
             pygame.draw.rect(surf, c, (mx + i*30, hud_y + 30, 20, 20))
 
         # Controls hint
-        hint = self.font_small.render("WASD/Arrows: move  E: pickup  Q: drop", True, (100, 100, 100))
+        mute_label = "[M] Muted" if self.music.muted else "[M] Music"
+        hint = self.font_small.render(
+            f"WASD/Arrows: move  E: pickup/drop  Q: quit  {mute_label}",
+            True, (100, 100, 100))
         surf.blit(hint, (SCREEN_W//2 - hint.get_width()//2, hud_y + 58))
 
     def draw_easter_egg(self, surf):
@@ -1301,6 +1510,8 @@ class Game:
                         sys.exit()
                     if event.key == pygame.K_r:
                         self.reset()
+                    if event.key == pygame.K_m:
+                        self.music.toggle_mute()
                     if self.state == 'playing':
                         if event.key == pygame.K_e:
                             if self.held_item:
@@ -1316,6 +1527,7 @@ class Game:
             if self.state == 'playing':
                 self.handle_input()
                 self.update()
+            self.music.update(self)  # always update music (handles all states)
 
             self.draw()
             self.clock.tick(FPS)
