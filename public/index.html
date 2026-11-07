@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Safe Haven — Team Leader Daily Reflection</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+
+<!-- Access gate: shown until the team leader signs in with the shared code. -->
+<main id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <p class="brand-mark">Safe Haven</p>
+    <h1 class="gate-title">Team Leader Daily Reflection</h1>
+    <p class="gate-note">This form is limited to authorized team leaders and supervisors.</p>
+    <form id="gate-form" novalidate>
+      <label class="field-label" for="access-code">Access code</label>
+      <input id="access-code" name="accessCode" type="password" autocomplete="current-password"
+             class="text-input" inputmode="text" spellcheck="false" required>
+      <p id="gate-error" class="inline-error" role="alert" hidden></p>
+      <button id="gate-submit" type="submit" class="btn btn-primary btn-block">Sign in</button>
+    </form>
+  </div>
+</main>
+
+<!-- Dashboard -->
+<div id="app" class="page" hidden>
+  <header class="page-header">
+    <p class="brand-mark">Safe Haven</p>
+    <h1 class="page-title">Safe Haven — Team Leader Daily Reflection</h1>
+    <p class="page-sub">
+      Completed privately at the end of the shift. The report is emailed to your supervisor as a PDF.
+    </p>
+  </header>
+
+  <main>
+    <!-- Top fields -->
+    <section class="card" aria-labelledby="shift-details-heading">
+      <h2 id="shift-details-heading" class="sr-only">Shift details</h2>
+      <div class="field">
+        <label class="field-label" for="tl-name">Team leader name</label>
+        <input id="tl-name" class="text-input" type="text" autocomplete="name"
+               maxlength="200" required>
+        <p class="inline-error" data-error-for="tl-name" role="alert" hidden></p>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="work-date">Work date</label>
+          <input id="work-date" class="text-input" type="date" required>
+          <p class="inline-error" data-error-for="work-date" role="alert" hidden></p>
+        </div>
+        <div class="field">
+          <label class="field-label" for="job-location">
+            Job / location <span class="optional">optional</span>
+          </label>
+          <input id="job-location" class="text-input" type="text" maxlength="200"
+                 autocomplete="off">
+        </div>
+      </div>
+    </section>
+
+    <!-- Topic selection -->
+    <section aria-labelledby="topics-heading">
+      <h2 id="topics-heading" class="section-heading">Choose the topic that best fits today</h2>
+      <p class="section-hint">
+        Open one topic. The other three stay available until you do, and come back when you close it.
+      </p>
+      <div id="topics" class="topics"></div>
+      <p class="inline-error" data-error-for="topic" role="alert" hidden></p>
+    </section>
+
+    <!-- Submit -->
+    <section id="submit-section" class="submit-section" hidden>
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+      <button id="submit-btn" type="button" class="btn btn-primary btn-block">Submit Report</button>
+      <p id="submit-hint" class="submit-hint">
+        Your answers are saved on this device as you type.
+      </p>
+    </section>
+
+    <!-- Success -->
+    <section id="success" class="success-card" role="status" aria-live="polite" hidden>
+      <h2 class="success-title">Report sent</h2>
+      <p id="success-detail" class="success-detail"></p>
+      <button id="new-report" type="button" class="btn btn-secondary">Start another report</button>
+    </section>
+  </main>
+
+  <footer class="page-footer">
+    <span id="mail-warning" class="mail-warning" hidden></span>
+    <button id="sign-out" type="button" class="link-btn">Sign out</button>
+  </footer>
+</div>
+
+<script nonce="__CSP_NONCE__">/*__SAFE_HAVEN_BOOTSTRAP__*/</script>
+<script src="/app.js"></script>
+</body>
+</html>
