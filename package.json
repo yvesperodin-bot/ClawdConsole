@@ -2,12 +2,13 @@
   "name": "safe-haven-reflection",
   "version": "1.0.0",
   "private": true,
-  "description": "Safe Haven — Team Leader Daily Reflection dashboard with emailed PDF reports",
+  "description": "Safe Haven \u2014 Team Leader Daily Reflection dashboard with emailed PDF reports",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check:pdf": "node scripts/sample-pdf.js"
+    "check:pdf": "node scripts/sample-pdf.js",
+    "check:mail": "node scripts/check-mail.js"
   },
   "engines": {
     "node": ">=18"
