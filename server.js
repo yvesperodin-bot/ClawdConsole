@@ -355,8 +355,9 @@ app.post(
     if (!config.mailConfigured) {
       return res.status(503).json({
         ok: false,
-        error:
-          'Emailing is not configured on the server yet. Your answers are saved — an administrator must set SUPERVISOR_EMAIL, MAIL_FROM and SMTP_HOST.',
+        error: config.recipientAllowed
+          ? 'Emailing is not configured on the server yet. Your answers are saved — an administrator must set SUPERVISOR_EMAIL, MAIL_FROM and SMTP_HOST.'
+          : 'Reports are not being sent because the configured supervisor address has not been approved. Your answers are saved — contact an administrator.',
         retryable: true,
       });
     }
@@ -431,8 +432,8 @@ if (require.main === module) {
     console.log(`Safe Haven reflection dashboard → http://localhost:${config.port}`);
     console.log(
       config.mailConfigured
-        ? `Reports email to: ${config.supervisorEmail}`
-        : 'Emailing is NOT configured — submissions will be refused until SMTP settings are set.'
+        ? `Reports email to: ${config.supervisorRecipient}`
+        : `Emailing is NOT configured — submissions will be refused. ${config.mailBlockedReason}`
     );
     if (missing.length) {
       console.log(`Missing settings in .env: ${missing.join(', ')}`);

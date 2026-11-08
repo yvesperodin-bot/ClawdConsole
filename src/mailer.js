@@ -64,9 +64,18 @@ async function sendReportEmail(report, pdfBuffer) {
     throw err;
   }
 
+  // Checked again here, not only at startup: this is the last point before a
+  // report leaves the building, and it must never go to an address that is not
+  // an approved supervisor.
+  if (!config.recipientAllowed) {
+    const err = new Error(config.mailBlockedReason);
+    err.code = 'RECIPIENT_NOT_ALLOWED';
+    throw err;
+  }
+
   const message = {
     from: config.mailFrom,
-    to: config.supervisorEmail,
+    to: config.supervisorRecipient,
     subject: buildSubject(report),
     text: buildBody(report),
     attachments: [

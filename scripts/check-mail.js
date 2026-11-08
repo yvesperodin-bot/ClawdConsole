@@ -65,7 +65,11 @@ async function main() {
   console.log('  SMTP_USER        ', config.smtp.user || '(not set)');
   console.log('  SMTP_PASS        ', mask(config.smtp.pass));
   console.log('  MAIL_FROM        ', config.mailFrom || '(not set)');
-  console.log('  SUPERVISOR_EMAIL ', config.supervisorEmail || '(not set)');
+  console.log('  SUPERVISOR_EMAIL ', config.supervisorRecipient || '(not set)');
+  console.log('  ALLOWLIST        ',
+    config.supervisorAllowlist.length
+      ? config.supervisorAllowlist.join(', ') + (config.recipientAllowed ? '  [recipient approved]' : '  [RECIPIENT NOT ON LIST]')
+      : '(none — any recipient permitted)');
   console.log('  MAIL_CC          ', config.mailCc || '(none)');
   console.log('  REPORT_TIMEZONE  ', config.timezone);
   console.log('');

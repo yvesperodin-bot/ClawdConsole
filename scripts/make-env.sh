@@ -60,8 +60,14 @@ printf '    If two-factor is on, use an app-specific password from\n'
 printf '    accounts.zoho.com > Security > App Passwords — not the account password.\n'
 ask_secret SMTP_PASS "  Password for $SMTP_USER (hidden)"
 ask MAIL_FROM "  From address (must be that mailbox or a verified alias)" "$SMTP_USER"
-ask SUPERVISOR_EMAIL "  Supervisor who receives every report"
-read -r -p "  Optional second recipient (blank for none): " MAIL_CC
+printf '\n  Designated supervisor — the one address every report goes to.\n'
+printf '  Team leaders never see or choose this.\n'
+ask SUPERVISOR_EMAIL "  Supervisor address" "bflores@misafehaven.com"
+ask SUPERVISOR_NAME "  Supervisor name (for the To: line)" "Brenda Flores"
+printf '\n  Approved recipients. Reports are refused if the supervisor above is\n'
+printf '  not on this list, so an unconfirmed address cannot receive live mail.\n'
+ask SUPERVISOR_ALLOWLIST "  Approved addresses (comma separated)" "$SUPERVISOR_EMAIL"
+read -r -p "  Optional second recipient, cc (blank for none): " MAIL_CC
 
 printf '\nServer\n'
 ask PORT "  Port to listen on" "3000"
@@ -89,6 +95,8 @@ SESSION_HOURS=12
 COOKIE_SECURE=true
 
 SUPERVISOR_EMAIL=$SUPERVISOR_EMAIL
+SUPERVISOR_NAME=$SUPERVISOR_NAME
+SUPERVISOR_ALLOWLIST=$SUPERVISOR_ALLOWLIST
 MAIL_FROM=$MAIL_FROM
 MAIL_CC=$MAIL_CC
 

@@ -17,6 +17,13 @@ function str(value) {
   return s === '' ? '' : s;
 }
 
+function list(value) {
+  return String(value ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 const config = {
   port: int(process.env.PORT, 3000),
   // Behind a proxy/load balancer set TRUST_PROXY=true so rate limiting sees
@@ -30,7 +37,15 @@ const config = {
   cookieSecure: bool(process.env.COOKIE_SECURE, false),
 
   // --- Mail ---------------------------------------------------------------
+  // The designated supervisor. Set by an administrator; team leaders never
+  // see or choose a recipient.
   supervisorEmail: str(process.env.SUPERVISOR_EMAIL),
+  supervisorName: str(process.env.SUPERVISOR_NAME),
+  // Addresses reports are permitted to go to. When set, SUPERVISOR_EMAIL must
+  // be one of them or the server refuses to send. This keeps a typo, or an
+  // edit nobody reviewed, from quietly redirecting reports, and it is how an
+  // address stays out of live sending until its owner has confirmed it.
+  supervisorAllowlist: list(process.env.SUPERVISOR_ALLOWLIST),
   mailFrom: str(process.env.MAIL_FROM),
   mailCc: str(process.env.MAIL_CC),
   smtp: {
@@ -51,9 +66,30 @@ const config = {
 
 config.sessionSecretProvided = str(process.env.SESSION_SECRET) !== '';
 config.accessCodeConfigured = config.accessCode !== '';
+
+// An allowlist, when present, is authoritative: the designated supervisor must
+// be on it.
+config.recipientAllowed =
+  config.supervisorAllowlist.length === 0 ||
+  config.supervisorAllowlist.includes(config.supervisorEmail.toLowerCase());
+
 config.mailConfigured = Boolean(
-  config.supervisorEmail && config.smtp.host && config.mailFrom
+  config.supervisorEmail && config.smtp.host && config.mailFrom && config.recipientAllowed
 );
+
+/** Why sending is unavailable, or '' when it is available. */
+config.mailBlockedReason = (() => {
+  if (config.mailConfigured) return '';
+  if (config.supervisorEmail && !config.recipientAllowed) {
+    return `SUPERVISOR_EMAIL (${config.supervisorEmail}) is not in SUPERVISOR_ALLOWLIST, so reports will not be sent. Add it to the allowlist once the recipient has confirmed the address.`;
+  }
+  return 'Mail is not configured.';
+})();
+
+/** The To header: "Name <address>" when a name is configured. */
+config.supervisorRecipient = config.supervisorName
+  ? `${config.supervisorName} <${config.supervisorEmail}>`
+  : config.supervisorEmail;
 
 /** Human-readable list of what still needs configuring. */
 function missingSettings() {
@@ -63,6 +99,9 @@ function missingSettings() {
   if (!config.supervisorEmail) missing.push('SUPERVISOR_EMAIL');
   if (!config.smtp.host) missing.push('SMTP_HOST');
   if (!config.mailFrom) missing.push('MAIL_FROM');
+  if (config.supervisorEmail && !config.recipientAllowed) {
+    missing.push('SUPERVISOR_ALLOWLIST (does not include SUPERVISOR_EMAIL)');
+  }
   return missing;
 }
 
