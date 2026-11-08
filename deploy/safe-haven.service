@@ -1,0 +1,52 @@
+# Safe Haven — Team Leader Daily Reflection
+#
+# Install:
+#   sudo cp deploy/safe-haven.service /etc/systemd/system/safe-haven.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now safe-haven
+#
+# Logs:   journalctl -u safe-haven -f
+# Reload: sudo systemctl restart safe-haven
+
+[Unit]
+Description=Safe Haven Team Leader Daily Reflection
+Documentation=https://github.com/yvesperodin-bot/ClawdConsole
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=safehaven
+Group=safehaven
+WorkingDirectory=/opt/safe-haven
+
+# Settings are read from /opt/safe-haven/.env by the app itself (dotenv), not
+# by systemd — so quoting in that file behaves the way .env.example shows.
+# Keep it owned by safehaven and chmod 600.
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server.js
+
+Restart=on-failure
+RestartSec=5s
+
+# Hardening. The app only ever needs to write data/ (the duplicate-submission
+# record), so everything else stays read-only.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/opt/safe-haven/data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=safe-haven
+
+[Install]
+WantedBy=multi-user.target

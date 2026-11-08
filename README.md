@@ -10,9 +10,14 @@ supervisor configured on the server.
 
 ```bash
 npm install
-cp .env.example .env     # then fill in the values below
+./scripts/make-env.sh    # prompts for settings; the password is never echoed
+npm run check:mail       # confirm the mail server accepts the credentials
 npm start                # http://localhost:3000
 ```
+
+`cp .env.example .env` and editing by hand works too. To deploy on a server,
+see **[DEPLOY.md](DEPLOY.md)** — systemd unit, nginx/TLS config, and the
+Zoho Mail settings.
 
 ## Settings needed to activate emailing
 
@@ -38,6 +43,14 @@ supervisor's address or any credential.
 
 The server prints which required settings are still missing at startup, and
 the dashboard shows a warning if emailing is not configured.
+
+**Zoho Mail:** a paid custom-domain account uses `SMTP_HOST=smtppro.zoho.com`
+(the free plan uses `smtp.zoho.com`), `SMTP_PORT=587`, `SMTP_SECURE=false`.
+Swap in the regional host for a non-US data centre (`smtppro.zoho.eu`,
+`smtppro.zoho.in`, `smtppro.zoho.com.au`). SMTP access must be enabled under
+Settings → Mail Accounts → IMAP/SMTP, and if two-factor is on, `SMTP_PASS`
+must be an app-specific password from accounts.zoho.com → Security → App
+Passwords. `MAIL_FROM` must be the authenticated mailbox or a verified alias.
 
 **Gmail / Google Workspace:** `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`,
 `SMTP_SECURE=false`, `SMTP_USER` = the sending account, `SMTP_PASS` = an
@@ -118,8 +131,11 @@ src/store.js           Duplicate-submission store
 public/index.html      The one-page dashboard
 public/styles.css      Styling — brand colours are the --brand-* tokens at the top
 public/app.js          Accordion behaviour, drafts, validation, submit
+scripts/make-env.sh    Interactive .env setup; takes the password without echoing it
+scripts/check-mail.js  Verify SMTP credentials, optionally send a sample report
 scripts/sample-pdf.js  Render a sample PDF to tmp/ without sending mail
 scripts/dev-smtp.js    Local SMTP sink for testing (development only)
+deploy/                systemd unit and nginx config for a VPS
 ```
 
 Topic wording lives only in `src/topics.js`. The server validates against it,
@@ -138,6 +154,15 @@ node scripts/dev-smtp.js 2525        # terminal 1 — writes messages to tmp/inb
 npm start                            # terminal 2
 npm run check:pdf                    # render a long sample PDF to tmp/
 ```
+
+## Checking a real mail setup
+
+```bash
+npm run check:mail                   # connect + authenticate only
+npm run check:mail -- --send         # email a sample report to the supervisor
+```
+
+On failure it names the likely cause rather than just echoing the SMTP error.
 
 ## Status of email delivery
 
